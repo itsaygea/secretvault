@@ -14,7 +14,7 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
-  VERSION="v0.1.7"
+  VERSION="v0.1.8"
 
   echo -e "${CYAN}"
   echo "════════════════════════════════════════════════════════════════════════"
@@ -61,14 +61,15 @@ main() {
   npm run build &>/dev/null
 
   echo -e "${CYAN}Installing SecretVault CLI binaries (secretvault, secretvault-cli, secretvault-mcp)...${RESET}"
-  npm install -g . --force &>/dev/null || npm install -g . --prefix="$HOME/.local" --force &>/dev/null || true
+  rm -f "$HOME/.local/bin/secretvault" "$HOME/.local/bin/secretvault-cli" "$HOME/.local/bin/secretvault-mcp" &>/dev/null || true
+  npm install -g ./packages/mcp-server --force &>/dev/null || npm install -g ./packages/mcp-server --prefix="$HOME/.local" --force &>/dev/null || true
 
   mkdir -p "$HOME/.local/bin"
-  NODE_BIN_DIR="$(npm bin -g 2>/dev/null || true)"
+  NODE_BIN_DIR="$(node -e 'console.log(require("path").dirname(process.execPath))' 2>/dev/null || true)"
   if [ -n "$NODE_BIN_DIR" ] && [ -x "$NODE_BIN_DIR/secretvault" ]; then
-    ln -sf "$NODE_BIN_DIR/secretvault" "$HOME/.local/bin/secretvault" 2>/dev/null || true
-    ln -sf "$NODE_BIN_DIR/secretvault-cli" "$HOME/.local/bin/secretvault-cli" 2>/dev/null || true
-    ln -sf "$NODE_BIN_DIR/secretvault-mcp" "$HOME/.local/bin/secretvault-mcp" 2>/dev/null || true
+    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault")" "$HOME/.local/bin/secretvault" 2>/dev/null || true
+    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-cli")" "$HOME/.local/bin/secretvault-cli" 2>/dev/null || true
+    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-mcp")" "$HOME/.local/bin/secretvault-mcp" 2>/dev/null || true
   fi
 
   if command -v secretvault &>/dev/null || [ -x "$HOME/.local/bin/secretvault" ]; then

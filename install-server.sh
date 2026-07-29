@@ -28,7 +28,7 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
-  VERSION="v0.1.7"
+  VERSION="v0.1.8"
 
   # Print Section Banner
   banner() {
