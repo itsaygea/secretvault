@@ -23,9 +23,11 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
+  VERSION="v0.1.1"
+
   echo -e "${CYAN}"
   echo "════════════════════════════════════════════════════════════════════════"
-  echo "       ⚡ SecretVault Client Setup & Tool Configurator                   "
+  echo "       ⚡ SecretVault Client Setup & Tool Configurator (${VERSION})      "
   echo "════════════════════════════════════════════════════════════════════════"
   echo -e "${RESET}"
 

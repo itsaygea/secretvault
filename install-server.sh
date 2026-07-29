@@ -21,21 +21,23 @@ main() {
   fi
 
   # ANSI Color Definitions
-BOLD="\033[1m"
-GREEN="\033[1;32m"
-CYAN="\033[1;36m"
-YELLOW="\033[1;33m"
-RED="\033[1;31m"
-RESET="\033[0m"
+  BOLD="\033[1m"
+  GREEN="\033[1;32m"
+  CYAN="\033[1;36m"
+  YELLOW="\033[1;33m"
+  RED="\033[1;31m"
+  RESET="\033[0m"
 
-# Print Section Banner
-banner() {
-  echo -e "${CYAN}"
-  echo "════════════════════════════════════════════════════════════════════════"
-  echo "       🔒 SecretVault Server Installer & Deployment Wizard              "
-  echo "════════════════════════════════════════════════════════════════════════"
-  echo -e "${RESET}"
-}
+  VERSION="v0.1.1"
+
+  # Print Section Banner
+  banner() {
+    echo -e "${CYAN}"
+    echo "════════════════════════════════════════════════════════════════════════"
+    echo "       🔒 SecretVault Server Installer & Deployment Wizard (${VERSION})  "
+    echo "════════════════════════════════════════════════════════════════════════"
+    echo -e "${RESET}"
+  }
 
 # Helper to read with default value (prints result to stdout, no eval)
 prompt_with_default() {
