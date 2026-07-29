@@ -269,8 +269,8 @@ export async function registerPasskey() {
 
   try {
     const optRes = await apiPost("/v1/auth/webauthn/register-options");
-    const options = await optRes.json();
-    if (!optRes.ok || options.error) return showToast(apiErrorMessage(options, "Passkey options failed"), true);
+    if (optRes.error || !optRes.data) return showToast(apiErrorMessage(optRes, "Passkey options failed"), true);
+    const options = optRes.data;
 
     options.challenge = base64UrlToBuffer(options.challenge);
     options.user.id = base64UrlToBuffer(options.user.id);
@@ -290,7 +290,8 @@ export async function registerPasskey() {
     };
 
     const verRes = await apiPost("/v1/auth/webauthn/register-verify", { response: responseData });
-    const verData = await verRes.json();
+    if (verRes.error || !verRes.data) return showToast(apiErrorMessage(verRes, "Passkey verification failed"), true);
+    const verData = verRes.data;
 
     if (verData.verified) {
       showToast("Passkey registered successfully!");
@@ -310,8 +311,8 @@ export async function verifyStepUpPasskey() {
 
   try {
     const optRes = await apiPost("/v1/auth/webauthn/authenticate-options");
-    const options = await optRes.json();
-    if (!optRes.ok || options.error) return showToast(apiErrorMessage(options, "Passkey auth options failed"), true);
+    if (optRes.error || !optRes.data) return showToast(apiErrorMessage(optRes, "Passkey auth options failed"), true);
+    const options = optRes.data;
 
     options.challenge = base64UrlToBuffer(options.challenge);
     if (options.allowCredentials) {
@@ -335,7 +336,8 @@ export async function verifyStepUpPasskey() {
       response: responseData,
       resource: getState().pendingStepUpResource || undefined,
     });
-    const verData = await verRes.json();
+    if (verRes.error || !verRes.data) return showToast(apiErrorMessage(verRes, "Passkey step-up verification failed"), true);
+    const verData = verRes.data;
 
     if (verData.stepUpToken) {
       setState({ stepUpToken: verData.stepUpToken });
@@ -351,6 +353,7 @@ export async function verifyStepUpPasskey() {
     openStepUpChooser();
   }
 }
+
 
 export function resumePendingAfterStepUp() {
   const s = getState();
