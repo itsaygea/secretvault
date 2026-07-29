@@ -17,29 +17,74 @@ function getHomeDir(): string {
 
 function getDetectedTools(): ToolConfigSpec[] {
   const home = getHomeDir();
+  const isMac = process.platform === "darwin";
+  const isWin = process.platform === "win32";
+  const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(home, ".config");
+  const appData = process.env.APPDATA || (isWin ? path.join(home, "AppData", "Roaming") : "");
 
-  let claudeDesktopPath = "";
-  if (process.platform === "darwin") {
-    claudeDesktopPath = path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
-  } else if (process.platform === "win32") {
-    claudeDesktopPath = path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
-  } else {
-    claudeDesktopPath = path.join(home, ".config", "Claude", "claude_desktop_config.json");
+  // 1. Antigravity IDE
+  const antigravityDir = process.env.ANTIGRAVITY_CONFIG_DIR || process.env.GEMINI_CONFIG_DIR;
+  const antigravityPath = antigravityDir
+    ? path.join(antigravityDir, "mcp_config.json")
+    : path.join(home, ".gemini", "config", "mcp_config.json");
+
+  // 2. Claude Code CLI
+  const customClaudeDir = process.env.CLAUDE_CONFIG_DIR;
+  let claudeCodePath = customClaudeDir
+    ? path.join(customClaudeDir, "claude.json")
+    : path.join(home, ".claude.json");
+  if (!customClaudeDir && !fs.existsSync(claudeCodePath) && fs.existsSync(path.join(home, ".claude", "settings.json"))) {
+    claudeCodePath = path.join(home, ".claude", "settings.json");
   }
 
+  // 3. Claude Desktop
+  let claudeDesktopPath = "";
+  if (isMac) {
+    claudeDesktopPath = path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  } else if (isWin) {
+    claudeDesktopPath = path.join(appData, "Claude", "claude_desktop_config.json");
+  } else {
+    claudeDesktopPath = path.join(xdgConfig, "Claude", "claude_desktop_config.json");
+  }
+
+  // 4. OpenCode
+  let openCodePath = "";
+  if (isMac) {
+    const macAppSupport = path.join(home, "Library", "Application Support", "opencode", "opencode.json");
+    const macXdg = path.join(xdgConfig, "opencode", "opencode.json");
+    openCodePath = fs.existsSync(macAppSupport) ? macAppSupport : macXdg;
+  } else if (isWin) {
+    const winAppData = path.join(appData, "opencode", "opencode.json");
+    const winXdg = path.join(xdgConfig, "opencode", "opencode.json");
+    openCodePath = fs.existsSync(winAppData) ? winAppData : winXdg;
+  } else {
+    openCodePath = path.join(xdgConfig, "opencode", "opencode.json");
+  }
+
+  // 5. Codex
   const codexPath = process.env.CODEX_HOME
     ? path.join(process.env.CODEX_HOME, "config.toml")
     : path.join(home, ".codex", "config.toml");
 
+  // 6. Cursor
+  let cursorPath = "";
+  if (isMac) {
+    cursorPath = path.join(home, "Library", "Application Support", "Cursor", "User", "globalStorage", "cursor.mcp", "mcp.json");
+  } else if (isWin) {
+    cursorPath = path.join(appData, "Cursor", "User", "globalStorage", "cursor.mcp", "mcp.json");
+  } else {
+    cursorPath = path.join(xdgConfig, "Cursor", "User", "globalStorage", "cursor.mcp", "mcp.json");
+  }
+
   const tools: ToolConfigSpec[] = [
     {
       name: "Antigravity IDE",
-      configPath: path.join(home, ".gemini", "config", "mcp_config.json"),
+      configPath: antigravityPath,
       format: "mcpServers",
     },
     {
       name: "Claude Code CLI",
-      configPath: path.join(home, ".claude.json"),
+      configPath: claudeCodePath,
       format: "claude_code",
     },
     {
@@ -49,13 +94,18 @@ function getDetectedTools(): ToolConfigSpec[] {
     },
     {
       name: "OpenCode",
-      configPath: path.join(home, ".config", "opencode", "opencode.json"),
+      configPath: openCodePath,
       format: "mcpServers",
     },
     {
       name: "Codex",
       configPath: codexPath,
       format: "codex",
+    },
+    {
+      name: "Cursor",
+      configPath: cursorPath,
+      format: "mcpServers",
     },
   ];
 
