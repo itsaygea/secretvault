@@ -17,11 +17,15 @@ function getHomeDir(): string {
 
 function getDetectedTools(): ToolConfigSpec[] {
   const home = getHomeDir();
-  const isMac = os.platform() === "darwin";
 
-  const claudeDesktopPath = isMac
-    ? path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-    : path.join(home, ".config", "Claude", "claude_desktop_config.json");
+  let claudeDesktopPath = "";
+  if (process.platform === "darwin") {
+    claudeDesktopPath = path.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  } else if (process.platform === "win32") {
+    claudeDesktopPath = path.join(process.env.APPDATA || path.join(home, "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
+  } else {
+    claudeDesktopPath = path.join(home, ".config", "Claude", "claude_desktop_config.json");
+  }
 
   const tools: ToolConfigSpec[] = [
     {
