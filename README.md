@@ -1,4 +1,4 @@
-# SecretVault MCP
+# SecretVault
 
 > **Bounded Egress Gateway & Secret Proxy for AI Agents and Applications.**
 > Safely inject credentials into approved upstream requests while keeping raw credentials out of LLM agent prompt contexts.
