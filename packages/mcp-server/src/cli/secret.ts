@@ -60,14 +60,19 @@ export async function handleSecretCli(): Promise<void> {
   const subcommand = args[0] || "list";
 
   const urlIdx = args.indexOf("--url");
-  const keyIdx = args.indexOf("--key");
+  let keyIdx = args.indexOf("--client-key");
+  if (keyIdx === -1) keyIdx = args.indexOf("--client_key");
+  if (keyIdx === -1) keyIdx = args.indexOf("--key");
+
+  const nameIdx = args.indexOf("--name");
+  const valIdx = args.indexOf("--value");
 
   const serverUrl = (urlIdx !== -1 && args[urlIdx + 1]) || process.env.SECRETVAULT_URL || "http://localhost:3004";
   const clientKey = (keyIdx !== -1 && args[keyIdx + 1]) || process.env.SECRETVAULT_CLIENT_KEY || process.env.SECRETVAULT_TOKEN || "";
 
   if (!clientKey && subcommand !== "help") {
     console.error("\x1b[1;31mError: Missing SecretVault Client Key or Token.\x1b[0m");
-    console.error("Set SECRETVAULT_CLIENT_KEY environment variable or pass --key <sv_...>");
+    console.error("Set SECRETVAULT_CLIENT_KEY environment variable or pass --client-key <sv_...>");
     process.exit(1);
   }
 
@@ -113,16 +118,23 @@ export async function handleSecretCli(): Promise<void> {
 
     case "create":
     case "add": {
+      let name = (nameIdx !== -1 && args[nameIdx + 1]) || "";
+      let value = (valIdx !== -1 && args[valIdx + 1]) || "";
+      let displayName = name;
+      let environment = "development";
+      let tags: string[] = [];
+
       const rl = readline.createInterface({ input, output });
       try {
-        console.log("\x1b[1;36m--- Create New Secret ---\x1b[0m");
-        const name = await promptInput(rl, "Secret Name (e.g. CONTEXT7_API_KEY)");
-        const value = await promptPassword(rl, "Secret Value");
-        const displayName = await promptInput(rl, "Display Name (Optional)", name);
-        const environment = await promptInput(rl, "Environment [development|staging|production]", "development");
-        const tagsStr = await promptInput(rl, "Tags (comma-separated, optional)", "");
-
-        const tags = tagsStr ? tagsStr.split(",").map((t) => t.trim()).filter(Boolean) : [];
+        if (!name || !value) {
+          console.log("\x1b[1;36m--- Create New Secret ---\x1b[0m");
+          if (!name) name = await promptInput(rl, "Secret Name (e.g. CONTEXT7_API_KEY)");
+          if (!value) value = await promptPassword(rl, "Secret Value");
+          displayName = await promptInput(rl, "Display Name (Optional)", name);
+          environment = await promptInput(rl, "Environment [development|staging|production]", "development");
+          const tagsStr = await promptInput(rl, "Tags (comma-separated, optional)", "");
+          tags = tagsStr ? tagsStr.split(",").map((t) => t.trim()).filter(Boolean) : [];
+        }
 
         let res = await fetch(`${serverUrl}/v1/secrets`, {
           method: "POST",
