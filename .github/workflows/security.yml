@@ -38,6 +38,10 @@ jobs:
     name: Scan repository (deps, config, secrets)
     needs: update-db
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
@@ -63,6 +67,7 @@ jobs:
 
       # 2. IaC / misconfiguration across repo config.
       - name: Scan configuration / IaC (gate on HIGH/CRITICAL)
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -75,6 +80,7 @@ jobs:
 
       # 3. Hard-coded secrets. Never gated off — a hit must always fail.
       - name: Scan for leaked secrets (gate on any finding)
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -87,6 +93,7 @@ jobs:
 
       # 4. SBOM from the source tree (Spdx for manifest breadth).
       - name: Generate SBOM (CycloneDX) from source
+        if: always()
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -95,6 +102,7 @@ jobs:
           output: reports/sbom-source.cdx.json
 
       - name: Upload SBOM artifact
+        if: always() && hashFiles('reports/sbom-source.cdx.json') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sbom-source-cyclonedx
@@ -102,21 +110,21 @@ jobs:
           if-no-files-found: error
 
       - name: Upload dependency SARIF
-        if: always()
+        if: always() && hashFiles('reports/deps.sarif') != ''
         uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3.30.0
         with:
           sarif_file: reports/deps.sarif
           category: trivy-dependencies
 
       - name: Upload config SARIF
-        if: always()
+        if: always() && hashFiles('reports/config.sarif') != ''
         uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3.30.0
         with:
           sarif_file: reports/config.sarif
           category: trivy-config
 
       - name: Upload secrets SARIF
-        if: always()
+        if: always() && hashFiles('reports/secrets.sarif') != ''
         uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3.30.0
         with:
           sarif_file: reports/secrets.sarif
