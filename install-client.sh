@@ -6,16 +6,7 @@
 # curl -fsSL https://raw.githubusercontent.com/itsaygea/secretvault/main/install-client.sh | bash
 # ==============================================================================
 
-set -eo pipefail
-
 main() {
-  # Attach stdin to TTY if available (required for curl | bash execution)
-  if [ -t 0 ]; then
-    : # Running directly in terminal
-  elif [ -e /dev/tty ]; then
-    exec < /dev/tty 2>/dev/null || true
-  fi
-
   # ANSI Colors
   CYAN="\033[1;36m"
   GREEN="\033[1;32m"
@@ -23,7 +14,7 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
-  VERSION="v0.1.5"
+  VERSION="v0.1.6"
 
   echo -e "${CYAN}"
   echo "════════════════════════════════════════════════════════════════════════"
@@ -80,12 +71,22 @@ main() {
   fi
 
   echo -e "${GREEN}✓ Environment ready. Launching setup...${RESET}\n"
-  if command -v secretvault &>/dev/null; then
-    secretvault setup "$@"
-  elif command -v secretvault-mcp &>/dev/null; then
-    secretvault-mcp setup "$@"
+  if [ -e /dev/tty ]; then
+    if command -v secretvault &>/dev/null; then
+      secretvault setup "$@" < /dev/tty
+    elif command -v secretvault-mcp &>/dev/null; then
+      secretvault-mcp setup "$@" < /dev/tty
+    else
+      node packages/mcp-server/dist/index.js setup "$@" < /dev/tty
+    fi
   else
-    node packages/mcp-server/dist/index.js setup "$@"
+    if command -v secretvault &>/dev/null; then
+      secretvault setup "$@"
+    elif command -v secretvault-mcp &>/dev/null; then
+      secretvault-mcp setup "$@"
+    else
+      node packages/mcp-server/dist/index.js setup "$@"
+    fi
   fi
 }
 
