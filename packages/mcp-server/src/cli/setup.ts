@@ -366,5 +366,6 @@ export async function handleSetupCli(): Promise<void> {
     console.log("\x1b[1;32m========================================================================\x1b[0m\n");
   } finally {
     rl.close();
+    process.exit(0);
   }
 }
