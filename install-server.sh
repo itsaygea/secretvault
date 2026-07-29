@@ -16,7 +16,7 @@ set -eo pipefail
 if [ -t 0 ]; then
   : # Already running in TTY
 elif [ -e /dev/tty ]; then
-  exec < /dev/tty
+  exec < /dev/tty 2>/dev/null || true
 fi
 
 # ANSI Color Definitions

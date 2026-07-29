@@ -1,26 +1,51 @@
 #!/usr/bin/env node
 import { handleRunCli } from "./runner.js";
 
-if (process.argv[2] === "run") {
+const arg = process.argv[2];
+
+if (arg === "run") {
   await handleRunCli();
   process.exit(0);
 }
 
-if (process.argv[2] === "setup") {
+if (arg === "setup") {
   const { handleSetupCli } = await import("./cli/setup.js");
   await handleSetupCli();
   process.exit(0);
 }
 
-if (process.argv[2] === "secret") {
+if (arg === "secret") {
   const { handleSecretCli } = await import("./cli/secret.js");
   await handleSecretCli();
   process.exit(0);
 }
 
-if (process.argv[2] === "rotate-master-key") {
+if (arg === "rotate-master-key") {
   const { handleRotateMasterKeyCli } = await import("./cli/rotateKey.js");
   await handleRotateMasterKeyCli();
+  process.exit(0);
+}
+
+if (arg === "--help" || arg === "-h" || arg === "help") {
+  console.log(`
+SecretVault CLI & MCP Server
+
+Usage:
+  secretvault-mcp setup                  Launch interactive developer tool setup wizard
+  secretvault-mcp secret <subcommand>   Manage secrets (list, create, rotate, delete)
+  secretvault-mcp run <args...>          Inject secrets into command execution
+  secretvault-mcp rotate-master-key      Re-encrypt stored database secrets
+  secretvault-mcp                        Start SecretVault MCP Server (requires environment vars)
+
+Options:
+  --help, -h     Show this help message
+  --version, -v  Show version
+`);
+  process.exit(0);
+}
+
+if (arg === "--version" || arg === "-v") {
+  console.log("0.1.0");
   process.exit(0);
 }
 

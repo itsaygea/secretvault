@@ -39,66 +39,79 @@ graph TD
 
 ---
 
-## Quickstart & Installation
+## Quickstart & Setup
 
-### Option A: Automated 1-Line Server Installer (Recommended)
+Connecting to SecretVault requires two sequential steps: **Deploying the SecretVault Server** (core infrastructure), followed by **Configuring Developer AI Tools** (connecting Antigravity IDE, Claude Code, etc.).
 
-Deploy SecretVault with interactive guided prompts for master keys, passwords, and database connections:
+---
+
+### Step 1: Deploy SecretVault Server (Required First)
+
+Deploy the core SecretVault server (AES-256-GCM proxy + Web UI + MCP engine).
+
+#### Option 1A: 1-Line Server Installer (Recommended)
+
+Interactive installer that configures database connections, generates encryption keys, and provisions Docker Compose:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/itsaygea/secretvault/main/install-server.sh | bash
 ```
 
----
-
-### Option B: Interactive Developer Client Setup Wizard
-
-Automatically connect developer AI tools (**Antigravity IDE**, **Claude Code**, **Claude Desktop**, **OpenCode**, **Codex**) to SecretVault:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/itsaygea/secretvault/main/install-client.sh | bash
-```
-*(Or via `npx @secretvault/mcp-server setup` when published).*
-
----
-
-### Option C: Terminal Secret Manager CLI
-
-Manage secrets directly from an SSH terminal without using the Web UI:
-
-```bash
-npx @secretvault/mcp-server secret list
-npx @secretvault/mcp-server secret create
-npx @secretvault/mcp-server secret rotate
-npx @secretvault/mcp-server secret delete
-```
-
----
-
-### Option D: Manual Docker Compose Deployment
+#### Option 1B: Manual Docker Compose Deployment
 
 ```bash
 # 1. Clone repository & enter directory
 git clone https://github.com/itsaygea/secretvault.git
 cd secretvault
 
-# 2. Prepare environment file
+# 2. Prepare environment configuration
 cp .env.example .env
 
 # 3. Generate 32-byte master key & edit .env
 openssl rand -hex 32
-nano .env # Paste master key, Supabase, and direct PostgreSQL credentials
+nano .env # Paste master key and database connection parameters
 
-# 4. Restrict permissions & boot
+# 4. Restrict file permissions & launch stack
 chmod 600 .env
 docker compose up -d
 
-# 5. Verify health & open UI
+# 5. Verify health check & access Web UI
 curl http://localhost:3004/health/ready
 # Open http://localhost:3004/ui in browser
 ```
 
-> 📖 **Full Installation Guide**: See **[docs/install.md](docs/install.md)** for migration access, Caddy HTTPS, and prerequisites. Startup migrations run before the server accepts traffic.
+---
+
+### Step 2: Connect Developer AI Tools & Clients
+
+Once your SecretVault server is running, connect your AI developer tools (**Antigravity IDE**, **Claude Code**, **Claude Desktop**, **OpenCode**, **Codex**):
+
+#### Option 2A: Interactive Developer Client Setup Wizard
+
+Automatically provisions linking keys and configures MCP settings across all detected developer tools:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/itsaygea/secretvault/main/install-client.sh | bash
+```
+
+*(Or launch directly via npx: `npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp setup`).*
+
+#### Option 2B: Terminal Secret Manager CLI
+
+Manage secrets directly from your terminal or SSH shell:
+
+```bash
+# Setup developer tool integrations
+npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp setup
+
+# Manage secrets via CLI
+npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret list
+npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret create
+npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret rotate
+npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret delete
+```
+
+> 📖 **Full Installation Guide**: See **[docs/install.md](docs/install.md)** for detailed server options, PostgreSQL migrations, and Caddy HTTPS setup.
 
 ---
 
