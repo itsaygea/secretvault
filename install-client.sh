@@ -42,8 +42,24 @@ fi
 
 echo -e "${GREEN}✓ Node.js $(node -v) detected.${RESET}\n"
 
-# 2. Launch Client Setup Wizard from GitHub
-echo -e "${CYAN}Launching SecretVault setup wizard...${RESET}\n"
+# 2. Launch Client Setup Wizard
+echo -e "${CYAN}Fetching SecretVault setup wizard...${RESET}\n"
 
-# Execute setup directly via npx from GitHub repository
-npx -y --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp setup
+TMP_DIR=$(mktemp -d)
+cleanup() {
+  rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+if command -v git &>/dev/null; then
+  git clone --depth 1 https://github.com/itsaygea/secretvault.git "$TMP_DIR" &>/dev/null
+else
+  mkdir -p "$TMP_DIR"
+  curl -fsSL https://github.com/itsaygea/secretvault/archive/refs/heads/main.tar.gz | tar -xz -C "$TMP_DIR" --strip-components=1 &>/dev/null
+fi
+
+cd "$TMP_DIR"
+npm ci --ignore-scripts &>/dev/null
+npm run build &>/dev/null
+
+node packages/mcp-server/dist/index.js setup "$@"
