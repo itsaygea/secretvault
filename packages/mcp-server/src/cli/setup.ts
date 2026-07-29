@@ -27,6 +27,10 @@ function getDetectedTools(): ToolConfigSpec[] {
     claudeDesktopPath = path.join(home, ".config", "Claude", "claude_desktop_config.json");
   }
 
+  const codexPath = process.env.CODEX_HOME
+    ? path.join(process.env.CODEX_HOME, "config.toml")
+    : path.join(home, ".codex", "config.toml");
+
   const tools: ToolConfigSpec[] = [
     {
       name: "Antigravity IDE",
@@ -50,7 +54,7 @@ function getDetectedTools(): ToolConfigSpec[] {
     },
     {
       name: "Codex",
-      configPath: path.join(home, ".codex", "config.toml"),
+      configPath: codexPath,
       format: "codex",
     },
   ];
