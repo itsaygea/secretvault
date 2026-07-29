@@ -1,0 +1,8 @@
+node_modules/
+.git/
+.github/
+.agents/
+.serena/
+aygea/
+CLAUDE.md
+*.log

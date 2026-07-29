@@ -1,0 +1,123 @@
+name: Publish image
+
+# Builds and publishes the SecretVault runtime image as a versioned,
+# digest-pinnable, multi-arch artifact with build provenance (SV-031).
+#
+# Produces, on a tag push (vX.Y.Z):
+#   - ghcr.io/itsaygea/secretvault:vX.Y.Z   (semver tag)
+#   - ghcr.io/itsaygea/secretvault:X.Y
+#   - ghcr.io/itsaygea/secretvault:X
+#   - ghcr.io/itsaygea/secretvault:latest
+#   - ghcr.io/itsaygea/secretvault:vX.Y.Z@sha256:...  (digest, immutable)
+#
+# Multi-arch (linux/amd64, linux/arm64) so the same digest runs on x86 and ARM
+# hosts. Provenance + SBOM attestations are attached so the image is verifiable.
+#
+# The distribution Compose (docker-compose.dist.yml) pulls one of these images;
+# docs/install.md documents only that path (the individual-files build option
+# has been removed).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (e.g. main or a tag)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # OIDC for keyless signing / provenance
+  attestations: write # attach build provenance + SBOM attestations
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  publish:
+    name: Build and publish multi-arch image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up QEMU (multi-arch emulation)
+        uses: docker/setup-qemu-action@49b3bc8b6968b86512638f579bea2b7b783dc20f # v3.6.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.10.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.5.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags and labels
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.8.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push image (multi-arch, provenance, SBOM)
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.18.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  # Smoke-test the published image exactly the way a downloader would: pull
+  # from the registry and run the distribution Compose from an empty directory.
+  dist-smoke:
+    name: Smoke-test distribution Compose from empty dir
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.5.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull published image via distribution Compose
+        working-directory: ${{ runner.temp }}
+        env:
+          SECRETVAULT_IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        run: |
+          cp ${{ github.workspace }}/docker-compose.yml ./docker-compose.yml
+          cp ${{ github.workspace }}/docker-compose.dist.yml ./docker-compose.dist.yml
+          printf 'SECRETVAULT_MASTER_KEY=%s\n' "$(openssl rand -hex 32)" > .env
+          # config validation proves the dist Compose resolves to a pullable
+          # image with no source/build context required.
+          docker compose -f docker-compose.yml -f docker-compose.dist.yml config --quiet

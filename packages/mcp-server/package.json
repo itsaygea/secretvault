@@ -1,0 +1,41 @@
+{
+  "name": "@secretvault/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "secretvault-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.test.*.map",
+    "!dist/cli/resetPassword*"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@secretvault/shared": "file:../shared",
+    "@simplewebauthn/server": "^13.1.2",
+
+    "@supabase/supabase-js": "^2.45.0",
+    "bcryptjs": "^2.4.3",
+    "express": "^5.2.1",
+    "otplib": "^12.0.1",
+    "pg": "^8.16.3",
+    "qrcode": "^1.5.4",
+    "zod": "^3.23.0"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc && cp -r ui/. dist/ui/",
+    "reset-admin-password": "node dist/cli.js"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/express": "^5.0.6",
+    "@types/pg": "^8.15.5",
+    "@types/qrcode": "^1.5.5"
+  },
+  "overrides": {
+    "@hono/node-server": "^2.0.11"
+  }
+}

@@ -1,0 +1,10 @@
+{$SECRETVAULT_DOMAIN:localhost} {
+  tls {$SECRETVAULT_ACME_EMAIL:internal}
+
+  reverse_proxy secretvault-mcp:3004 {
+    header_up Host {host}
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Forwarded-Proto https
+  }
+}

@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  FORCE_JAVASCRIPT_ACTIONS_NODE_TYPE: "node24"
+
+jobs:
+  quality:
+    name: Build, test, audit, and drift checks
+    runs-on: ubuntu-latest
+    steps:
+      # Pinned to immutable commit SHAs so workflow behavior cannot change
+      # under a third party. Update via Dependabot PR review, never by tag.
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all workspaces
+        run: npm run build
+
+      - name: Check database schema drift
+        run: npm run check:schema-drift
+
+      - name: Check OpenAPI drift
+        run: npm run check:openapi-drift
+
+      - name: Run tests
+        run: npm test -- --run
+
+      - name: Lint GitHub Actions workflows (immutable action pins)
+        run: node scripts/check-workflow-pins.mjs
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  container:
+    name: Build and scan container
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload SARIF results from scans
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+
+      - name: Build container image
+        run: docker build --tag secretvault-mcp:ci .
+
+      # exit-code 1 means a fixable HIGH/CRITICAL finding fails CI.
+      # Accepted risk lives in .trivyignore with owner/rationale/expiration.
+      - name: Scan container image with Trivy (gate)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: secretvault-mcp:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+          vuln-type: os,library
+
+      - name: Create reports directory
+        run: mkdir -p reports
+
+      - name: Generate SBOM (CycloneDX) from image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: secretvault-mcp:ci
+          format: cyclonedx
+          output: reports/sbom-image.cdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-image-cyclonedx
+          path: reports/sbom-image.cdx.json
+          if-no-files-found: error
+
+  docker-e2e:
+    name: Docker Compose end-to-end smoke test
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.2.2
+
+      - name: Configure CI services
+        run: cp ci/secretvault.env .env
+
+      - name: Validate merged Compose configuration
+        run: docker compose -f docker-compose.yml -f ci/docker-compose.ci.yml config --quiet
+
+      - name: Build and start full stack
+        run: docker compose -f docker-compose.yml -f ci/docker-compose.ci.yml up -d --build
+
+      - name: Wait for application health
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://localhost:3004/health/ready; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose -f docker-compose.yml -f ci/docker-compose.ci.yml logs
+          exit 1
+
+      - name: Check published OpenAPI contract
+        run: curl --fail --silent http://localhost:3004/docs/openapi.json | node -e 'let body=""; process.stdin.on("data", chunk => body += chunk); process.stdin.on("end", () => { const doc = JSON.parse(body); if (doc.openapi !== "3.1.0") process.exit(1); });'
+
+      # SV-029: prove the real PostgREST grant/RLS matrix (service_role in,
+      # anon out, secretvault exposed, auth not) against a live API.
+      - name: Wait for PostgREST
+        run: |
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:3001/ >/dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo "PostgREST did not become ready"; exit 1
+
+      - name: Assert PostgREST least-privilege matrix
+        run: node ci/postgrest-permissions.mjs http://127.0.0.1:3001
+
+      - name: Collect service logs
+        if: always()
+        run: docker compose -f docker-compose.yml -f ci/docker-compose.ci.yml logs --no-color
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f ci/docker-compose.ci.yml down --volumes --remove-orphans

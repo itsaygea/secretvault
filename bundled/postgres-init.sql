@@ -1,0 +1,39 @@
+-- Bundled PostgreSQL bootstrap for SecretVault (#94).
+--
+-- Mirrors the role architecture of ci/postgres-init.sql so the bundled
+-- postgres:16-alpine container exposes the same grant/RLS/PostgREST path the
+-- application relies on in production and CI. This is applied once by the
+-- postgres image entrypoint (docker-entrypoint-initdb.d) on first boot only,
+-- before the one-shot `migrate` service runs the Supabase migrations.
+--
+--   authenticator  - LOGIN role PostgREST connects as; switches into
+--                    service_role or anon per request via SET LOCAL ROLE.
+--   service_role   - NOLOGIN; trusted backend role the app queries as.
+--                    Migrations grant it SELECT/INSERT/UPDATE/DELETE on every
+--                    table and USAGE on the secretvault schema.
+--   anon           - NOLOGIN; untrusted role. Must NOT read secretvault data.
+--
+-- The authenticator password is a fixed network-internal value: the bundled
+-- postgres + postgrest services live on the same Docker network, the postgres
+-- port is never published to the host, and API access is gated by the
+-- PGRST_JWT_SECRET (which the installer generates per-install). It is NOT a
+-- credential an outside caller can use. This matches the CI stack's design.
+
+CREATE ROLE service_role NOLOGIN;
+CREATE ROLE anon NOLOGIN;
+CREATE ROLE authenticator LOGIN PASSWORD 'bundled-authenticator' IN ROLE service_role, anon;
+
+-- PostgREST resolves request.jwt.claim.role through this function (the same
+-- convention the 001 RLS policies rely on via auth.role()).
+--
+-- Supabase Cloud populates the legacy `request.jwt.claim.role` GUC; standalone
+-- PostgREST v12 sets only the `request.jwt.claims` JSON GUC and performs
+-- SET LOCAL ROLE directly. Fall back to the effective role so the same RLS
+-- policies are exercised faithfully. current_user reflects the role PostgREST
+-- switched into for the request (service_role or anon).
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE OR REPLACE FUNCTION auth.role()
+RETURNS text
+LANGUAGE sql
+STABLE
+AS $$ SELECT COALESCE(NULLIF(current_setting('request.jwt.claim.role', true), ''), current_user) $$;

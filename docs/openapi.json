@@ -1,0 +1,2246 @@
+{
+  "openapi": "3.1.0",
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "info": {
+    "title": "SecretVault Management API",
+    "version": "0.1.0",
+    "description": "Versioned management and metadata contract for the SecretVault credentialed egress gateway. The generic proxy is documented separately because upstream response bodies are not typed by SecretVault."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3004",
+      "description": "Self-hosted SecretVault"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Version",
+      "description": "Protocol and server capabilities"
+    },
+    {
+      "name": "Auth",
+      "description": "Authentication and step-up authentication"
+    },
+    {
+      "name": "Secrets",
+      "description": "Masked secret metadata and lifecycle operations"
+    },
+    {
+      "name": "Profiles",
+      "description": "Credential proxy service profiles"
+    },
+    {
+      "name": "Clients",
+      "description": "Scoped linking-key applications"
+    },
+    {
+      "name": "Users",
+      "description": "Administrator user management"
+    },
+    {
+      "name": "System",
+      "description": "System settings and operational metadata"
+    },
+    {
+      "name": "Proxy",
+      "description": "Untyped upstream request forwarding contract"
+    }
+  ],
+  "paths": {
+    "/v1/version": {
+      "get": {
+        "operationId": "getVersion",
+        "tags": [
+          "Version"
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Login"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
+      }
+    },
+    "/v1/auth/status": {
+      "get": {
+        "operationId": "getAuthStatus",
+        "tags": [
+          "Auth"
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
+      }
+    },
+    "/v1/auth/setup": {
+      "post": {
+        "operationId": "setupAdmin",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Setup"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
+      }
+    },
+    "/v1/settings/public": {
+      "get": {
+        "operationId": "getPublicSettings",
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "operationId": "register",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Register"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "operationId": "getMe",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/user/logs": {
+      "get": {
+        "operationId": "listUserLogs",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page's next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "access_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed",
+                "denied",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "secret_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-sv-auth": "scope"
+      }
+    },
+    "/v1/auth/change-password": {
+      "post": {
+        "operationId": "changePassword",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ChangePassword"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/settings": {
+      "get": {
+        "operationId": "getSystemSettings",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      },
+      "patch": {
+        "operationId": "updateSystemSettings",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/SystemSettings"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/admin/stats": {
+      "get": {
+        "operationId": "getAdminStats",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/users": {
+      "get": {
+        "operationId": "listUsers",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createUser",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/User"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/users/{id}": {
+      "delete": {
+        "operationId": "deleteUser",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/users/{id}/reset-password": {
+      "post": {
+        "operationId": "resetUserPassword",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/PasswordReset"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/users/{id}/reset-2fa": {
+      "post": {
+        "operationId": "resetUserTwoFactor",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/users/{id}/linking-key": {
+      "post": {
+        "operationId": "generateLinkingKey",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "self_or_admin_session"
+      }
+    },
+    "/v1/service-profiles": {
+      "get": {
+        "operationId": "listServiceProfiles",
+        "tags": [
+          "Profiles"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createServiceProfile",
+        "tags": [
+          "Profiles"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ServiceProfile"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
+    "/v1/service-profiles/{id}": {
+      "delete": {
+        "operationId": "deleteServiceProfile",
+        "tags": [
+          "Profiles"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
+    "/v1/clients": {
+      "get": {
+        "operationId": "listClients",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createClient",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Client"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/clients/{id}": {
+      "delete": {
+        "operationId": "deleteClient",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      },
+      "patch": {
+        "operationId": "updateClient",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Client"
+        }
+      }
+    },
+    "/v1/clients/{id}/logs": {
+      "get": {
+        "operationId": "getClientLogs",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page's next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "access_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed",
+                "denied",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "secret_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/register-options": {
+      "post": {
+        "operationId": "getWebAuthnRegistrationOptions",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/register-verify": {
+      "post": {
+        "operationId": "verifyWebAuthnRegistration",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/WebAuthn"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/authenticate-options": {
+      "post": {
+        "operationId": "getWebAuthnAuthenticationOptions",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/authenticate-verify": {
+      "post": {
+        "operationId": "verifyWebAuthnAuthentication",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/WebAuthn"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/setup": {
+      "post": {
+        "operationId": "setupTotp",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/cancel-setup": {
+      "post": {
+        "operationId": "cancelTotpSetup",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/verify-setup": {
+      "post": {
+        "operationId": "verifyTotpSetup",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/TotpCode"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/authenticate": {
+      "post": {
+        "operationId": "authenticateTotp",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/StepUpCode"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/regenerate-backup-codes": {
+      "post": {
+        "operationId": "regenerateTotpBackupCodes",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-SecretVault-StepUp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp": {
+      "delete": {
+        "operationId": "disableTotp",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/secrets": {
+      "get": {
+        "operationId": "listSecrets",
+        "tags": [
+          "Secrets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createSecret",
+        "tags": [
+          "Secrets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Secret"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
+    "/v1/secrets/{name}/reveal": {
+      "post": {
+        "operationId": "revealSecret",
+        "tags": [
+          "Secrets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/secrets/{name}/rotate": {
+      "post": {
+        "operationId": "rotateSecret",
+        "tags": [
+          "Secrets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Name"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/RotateSecret"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
+    "/v1/secrets/{name}": {
+      "delete": {
+        "operationId": "deleteSecret",
+        "tags": [
+          "Secrets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
+    "/proxy/{profile}/{path}": {
+      "parameters": [
+        {
+          "name": "profile",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._~-]{1,64}$"
+          }
+        },
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "description": "Path remainder, treated strictly as upstream path/query data. It must not replace the configured origin.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "description": "Proxy contract: authenticate with Authorization: Bearer <linking_key>; the profile controls credential injection, allowed methods, path prefixes, destination origin, and DNS pinning. Caller query parameters pass through as query data. Caller Host, Authorization, and Connection headers are not trusted; response bodies are opaque upstream data and sensitive response headers are stripped.",
+      "x-secretvault-contract": {
+        "request_headers": "Caller headers pass through except Host, Authorization, and Connection; SecretVault injects the profile credential.",
+        "query": "Query parameters pass through unchanged as upstream query data.",
+        "redirects": "Redirects are not followed by SecretVault.",
+        "response": "Status, non-sensitive headers, and opaque upstream body are returned; upstream body sanitization is not claimed.",
+        "errors": "SecretVault-generated errors use the ErrorEnvelope schema; upstream responses retain their upstream status/body semantics."
+      },
+      "get": {
+        "operationId": "proxyGet",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "post": {
+        "operationId": "proxyPost",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "put": {
+        "operationId": "proxyPut",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "patch": {
+        "operationId": "proxyPatch",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "delete": {
+        "operationId": "proxyDelete",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "head": {
+        "operationId": "proxyHead",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "options": {
+        "operationId": "proxyOptions",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        }
+      }
+    },
+    "/v1/settings/audit-retention": {
+      "get": {
+        "operationId": "getAuditRetention",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Return the configured audit retention policy (retention_days, floor_days).",
+        "x-sv-auth": "admin_session"
+      },
+      "patch": {
+        "operationId": "updateAuditRetention",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Json"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Set bounded audit retention. A server-enforced floor prevents pruning of recent rows. Pruning is applied immediately and the count of removed rows is returned.",
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/user/logs/export": {
+      "get": {
+        "operationId": "exportUserLogs",
+        "tags": [
+          "Audit"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Export an immutable audit-log snapshot (ascending created_at) for archival.",
+        "x-sv-auth": "scope"
+      }
+    },
+    "/v1/clients/{id}/reveal": {
+      "post": {
+        "operationId": "revealClientKey",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Reveal a client application's plaintext linking key. Critical operation requiring a recent, client-bound step-up (X-SecretVault-StepUp). A step-up minted for a different client is rejected with 403 STEP_UP_REQUIRED.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/clients/{id}/regenerate": {
+      "post": {
+        "operationId": "regenerateClientKey",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Regenerate a client application's linking key, atomically invalidating the prior key via key_version. Critical operation requiring a recent, client-bound step-up (X-SecretVault-StepUp). On a concurrent regeneration returns 409 KEY_REGENERATE_CONFLICT.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/credentials": {
+      "get": {
+        "operationId": "listPasskeys",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/credentials/{id}": {
+      "delete": {
+        "operationId": "deletePasskey",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ]
+      }
+    },
+    "/v1/client/secrets/{name}": {
+      "get": {
+        "operationId": "resolveClientSecret",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Name"
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "SecretVault linking key or session token"
+      }
+    },
+    "parameters": {
+      "Id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "Name": {
+        "name": "name",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "schemas": {
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "requestId",
+              "status"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Stable machine-readable error code."
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": "string"
+              },
+              "status": {
+                "type": "integer",
+                "minimum": 400,
+                "maximum": 599
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "Json": {
+        "description": "Endpoint-specific JSON response."
+      },
+      "Login": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Setup": {
+        "type": "object",
+        "required": [
+          "setup_code",
+          "username",
+          "password"
+        ],
+        "properties": {
+          "setup_code": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Register": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ChangePassword": {
+        "type": "object",
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "format": "password"
+          },
+          "new_password": {
+            "type": "string",
+            "format": "password"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SystemSettings": {
+        "type": "object",
+        "properties": {
+          "open_registration_enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          },
+          "is_admin": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "PasswordReset": {
+        "type": "object",
+        "required": [
+          "new_password"
+        ],
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "format": "password"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ServiceProfile": {
+        "type": "object",
+        "required": [
+          "name",
+          "target_url",
+          "auth_method",
+          "pass_secret_name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "target_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "auth_method": {
+            "type": "string",
+            "enum": [
+              "basic",
+              "bearer",
+              "header",
+              "cookie"
+            ]
+          },
+          "user_secret_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pass_secret_name": {
+            "type": "string"
+          },
+          "header_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required for auth_method 'header'. Must be a valid HTTP field-name token (RFC 7230) and must not be a reserved hop-by-hop, framing, routing, or credential header.",
+            "pattern": "^[A-Za-z0-9!#$%&'*+\\-.^_`|~]{1,128}$"
+          },
+          "cookie_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required for auth_method 'cookie'. Must be a valid cookie-name token (RFC 6265).",
+            "pattern": "^[A-Za-z0-9!#$%&'*+\\-.^_`|~]{1,128}$"
+          },
+          "allow_private_network": {
+            "type": "boolean"
+          },
+          "allowed_methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowed_path_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "Client": {
+        "type": "object",
+        "required": [
+          "app_name"
+        ],
+        "properties": {
+          "app_name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "WebAuthn": {
+        "type": "object",
+        "required": [
+          "response"
+        ],
+        "properties": {
+          "response": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "device_name": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Code": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TotpCode": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StepUpCode": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 6,
+            "maxLength": 12,
+            "description": "6-digit TOTP code or 8-12 character one-time recovery code"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Secret": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "environment": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "RotateSecret": {
+        "type": "object",
+        "required": [
+          "new_value"
+        ],
+        "properties": {
+          "new_value": {
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "requestBodies": {
+      "Login": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Login"
+            }
+          }
+        }
+      },
+      "Setup": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Setup"
+            }
+          }
+        }
+      },
+      "Register": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Register"
+            }
+          }
+        }
+      },
+      "ChangePassword": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ChangePassword"
+            }
+          }
+        }
+      },
+      "SystemSettings": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/SystemSettings"
+            }
+          }
+        }
+      },
+      "User": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/User"
+            }
+          }
+        }
+      },
+      "PasswordReset": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/PasswordReset"
+            }
+          }
+        }
+      },
+      "ServiceProfile": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ServiceProfile"
+            }
+          }
+        }
+      },
+      "Client": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Client"
+            }
+          }
+        }
+      },
+      "WebAuthn": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/WebAuthn"
+            }
+          }
+        }
+      },
+      "Code": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Code"
+            }
+          }
+        }
+      },
+      "TotpCode": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/TotpCode"
+            }
+          }
+        }
+      },
+      "StepUpCode": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/StepUpCode"
+            }
+          }
+        }
+      },
+      "Secret": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Secret"
+            }
+          }
+        }
+      },
+      "RotateSecret": {
+        "required": true,
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RotateSecret"
+            }
+          }
+        }
+      },
+      "Json": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Json": {
+        "description": "Successful JSON response.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Json"
+            }
+          }
+        }
+      },
+      "Error": {
+        "description": "Standard SecretVault error envelope.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Proxy": {
+        "description": "Opaque upstream response or a SecretVault ErrorEnvelope.",
+        "headers": {
+          "X-Request-ID": {
+            "$ref": "#/components/headers/RequestId"
+          }
+        }
+      }
+    },
+    "headers": {
+      "RequestId": {
+        "description": "Correlation ID for the request and its audit event.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

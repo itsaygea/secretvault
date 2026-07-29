@@ -1,0 +1,1483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#090d16">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>SecretVault — Credential & Security Control</title>
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --card-bg: rgba(17, 24, 39, 0.7);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --accent-rose: #f43f5e;
+      --accent-purple: #8b5cf6;
+      --glass-glow: rgba(6, 182, 212, 0.15);
+      /* Dark-glass navigation surfaces (Map #97). Idle tabs carry an explicit
+         frosted background so there is nothing to "flash" white against on
+         hover/focus — the classic flash comes from transparent -> rgba(white)
+         transitions plus the UA button default. Pinning a dark glass base
+         removes it. */
+      --nav-glass: rgba(255, 255, 255, 0.04);
+      --nav-glass-border: rgba(255, 255, 255, 0.09);
+      --nav-glass-hover: rgba(255, 255, 255, 0.08);
+      --nav-active-bg: linear-gradient(180deg, rgba(6, 182, 212, 0.18), rgba(6, 182, 212, 0.06));
+      --nav-active-border: rgba(6, 182, 212, 0.45);
+      --nav-active-glow: 0 0 0 1px rgba(6, 182, 212, 0.15), 0 6px 18px rgba(6, 182, 212, 0.12);
+      /* System font stacks — no external/CDN font dependency (SV-073).
+         Keeps the console fully usable offline and shrinks the CSP surface. */
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(6, 182, 212, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.1) 0px, transparent 50%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── 6-Box TOTP PIN Input (accessible group) ── */
+    .totp-pin-container {
+      display: flex;
+      gap: 0.4rem;
+      justify-content: center;
+      margin: 0.75rem 0;
+    }
+    .totp-pin-box {
+      width: 44px;
+      height: 52px;
+      font-size: 1.4rem;
+      font-weight: 700;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: var(--accent-cyan);
+      outline: none;
+      transition: all 0.2s ease;
+      font-family: var(--font-mono);
+    }
+    .totp-pin-box:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.4);
+      background: rgba(6, 182, 212, 0.1);
+    }
+
+    /* ── Capability Cards & Tooltips ── */
+    .capabilities-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+    }
+    .capability-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--card-border);
+      padding: 0.65rem 0.85rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .capability-card:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .capability-card input[type="checkbox"] {
+      margin-top: 0.2rem;
+      accent-color: var(--accent-cyan);
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+    .capability-info {
+      flex: 1;
+    }
+    .capability-title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 600;
+      font-size: 0.83rem;
+      color: #fff;
+    }
+    .capability-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.15rem;
+    }
+    .tooltip-icon {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      font-size: 0.72rem;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--accent-cyan);
+      cursor: help;
+      margin-left: auto;
+      border: 1px solid var(--card-border);
+      font-weight: 700;
+      /* keyboard + touch reachable */
+      flex-shrink: 0;
+    }
+    .tooltip-icon:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.5);
+      border-color: var(--accent-cyan);
+    }
+    .tooltip-icon:hover::after,
+    .tooltip-icon:focus::after,
+    .tooltip-icon:focus-visible::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 125%;
+      right: 0;
+      width: 230px;
+      max-width: 60vw;
+      background: #0f172a;
+      color: #f1f5f9;
+      padding: 0.6rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+      font-size: 0.75rem;
+      font-weight: normal;
+      line-height: 1.4;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    /* ── Modal Close Button (✕) ── */
+    .modal {
+      position: relative;
+    }
+    .modal-close-x {
+      position: absolute;
+      top: 1.15rem;
+      right: 1.15rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      width: 44px;
+      height: 44px;
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.05rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      line-height: 1;
+      z-index: 10;
+      flex-shrink: 0;
+    }
+    .modal-close-x:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.55);
+      border-color: var(--accent-cyan);
+    }
+    .modal-close-x:hover {
+      background: rgba(239, 68, 68, 0.2);
+      color: #ef4444;
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+
+    /* ── Navbar ── */
+    header {
+      background: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      position: sticky; top: 0; z-index: 40;
+    }
+    .nav-container {
+      max-width: 1200px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.85rem 1.5rem; gap: 1rem;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 0.6rem;
+      font-size: 1.25rem; font-weight: 700; color: #fff; text-decoration: none; flex-shrink: 0;
+    }
+    .brand-icon {
+      width: 32px; height: 32px; background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+      border-radius: 8px; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; font-size: 1.1rem; color: #fff; box-shadow: 0 0 12px var(--glass-glow);
+    }
+    .nav-tabs {
+      display: flex; gap: 0.4rem; list-style: none;
+      align-items: center; margin: 0; padding: 0.35rem;
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--nav-glass-border);
+      -webkit-overflow-scrolling: touch;
+    }
+    .nav-tab {
+      padding: 0.5rem 0.85rem; border-radius: 10px; font-size: 0.88rem; font-weight: 500;
+      color: var(--text-muted); cursor: pointer; transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+      display: flex; align-items: center; gap: 0.4rem;
+      background: var(--nav-glass); border: 1px solid var(--nav-glass-border); white-space: nowrap;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .nav-tab:hover { color: #fff; background: var(--nav-glass-hover); border-color: rgba(255, 255, 255, 0.16); }
+    .nav-tab.active {
+      color: #fff; font-weight: 600;
+      background: var(--nav-active-bg); border-color: var(--nav-active-border);
+      box-shadow: var(--nav-active-glow);
+    }
+    .nav-tab.active .nav-tab-label { color: var(--accent-cyan); }
+
+    .user-pill {
+      display: flex; align-items: center; gap: 0.6rem; background: rgba(255, 255, 255, 0.04);
+      padding: 0.4rem 0.8rem; border-radius: 20px; border: 1px solid var(--card-border);
+      font-size: 0.82rem; flex-shrink: 0; margin-left: auto;
+    }
+    .badge-admin {
+      background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald);
+      padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    }
+    .badge-user {
+      background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan);
+      padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    }
+
+    /* ── Settings Sub-Navigation ── */
+    .subnav-btn {
+      padding: 0.45rem 0.85rem; border-radius: 10px; font-size: 0.82rem; font-weight: 500;
+      color: var(--text-muted); background: var(--nav-glass); border: 1px solid var(--nav-glass-border);
+      cursor: pointer; transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .subnav-btn:hover { color: #fff; background: var(--nav-glass-hover); border-color: rgba(255, 255, 255, 0.16); }
+    .subnav-btn.active {
+      color: #fff; font-weight: 600;
+      background: var(--nav-active-bg); border-color: var(--nav-active-border);
+      box-shadow: var(--nav-active-glow);
+    }
+    .badge-admin {
+      background: rgba(16, 185, 129, 0.2); color: var(--accent-emerald);
+      padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    }
+    .badge-user {
+      background: rgba(6, 182, 212, 0.2); color: var(--accent-cyan);
+      padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+    }
+
+    /* ── Switch Toggle & Code Block ── */
+    .switch { position: relative; display: inline-block; width: 46px; height: 24px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #374151; transition: .25s; border-radius: 24px; border: 1px solid var(--card-border); }
+    .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 2px; bottom: 2px; background-color: white; transition: .25s; border-radius: 50%; }
+    input:checked + .slider { background-color: var(--accent-emerald); }
+    input:checked + .slider:before { transform: translateX(22px); }
+
+    /* ── Action Button Group & Uniform Compact Buttons ── */
+    .btn-action-group {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+    .btn-sm {
+      padding: 0.3rem 0.6rem;
+      font-size: 0.78rem;
+      font-weight: 500;
+      border-radius: 6px;
+      white-space: nowrap;
+      line-height: 1.2;
+    }
+
+    .code-block {
+
+      background: #0d1117; border: 1px solid var(--card-border); border-radius: 8px;
+      padding: 0.85rem; font-family: monospace; font-size: 0.8rem; color: #e6edf3;
+      overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 0; display: block;
+    }
+
+    /* ── Main & Views ── */
+    main { flex: 1; max-width: 1200px; width: 100%; margin: 2rem auto; padding: 0 1.5rem; }
+    .view-panel { display: none; animation: fadeIn 0.25s ease-out forwards; }
+    .view-panel.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ── Cards & UI Components ── */
+    .card {
+      background: var(--card-bg); backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border); border-radius: 12px;
+      padding: 1.5rem; margin-bottom: 1.5rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1.25rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--card-border);
+    }
+    .card-title { font-size: 1.1rem; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 0.5rem; }
+
+    /* ── Auth Cards ── */
+    .auth-container { max-width: 420px; margin: 4rem auto; text-align: center; }
+    .auth-card {
+      background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border); border-radius: 16px; padding: 2rem;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.5); text-align: left;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      padding: 0.55rem 1rem; border-radius: 8px; font-size: 0.85rem; font-weight: 500;
+      cursor: pointer; transition: all 0.18s ease; border: 1px solid transparent;
+      display: inline-flex; align-items: center; gap: 0.4rem; outline: none;
+    }
+    /* Restore a high-contrast keyboard focus indicator everywhere (SV-061). */
+    .btn:focus-visible,
+    .nav-tab:focus-visible,
+    .subnav-btn:focus-visible,
+    .form-input:focus-visible,
+    .form-select:focus-visible,
+    a:focus-visible,
+    [tabindex]:focus-visible,
+    input[type="checkbox"]:focus-visible,
+    input[type="radio"]:focus-visible,
+    .switch input:focus-visible + .slider {
+      outline: 2px solid var(--accent-cyan);
+      outline-offset: 2px;
+      box-shadow: 0 0 0 4px rgba(6, 182, 212, 0.25);
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-cyan), #0284c7); color: #fff;
+      box-shadow: 0 4px 14px rgba(6, 182, 212, 0.3);
+    }
+    .btn-primary:hover { opacity: 0.92; transform: translateY(-1px); }
+    .btn-secondary { background: rgba(255, 255, 255, 0.06); color: var(--text-main); border-color: var(--card-border); }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.12); }
+    .btn-danger { background: rgba(244, 63, 94, 0.15); color: var(--accent-rose); border-color: rgba(244, 63, 94, 0.3); }
+    .btn-danger:hover { background: rgba(244, 63, 94, 0.25); }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.88rem; }
+    th { color: var(--text-muted); font-weight: 500; padding: 0.75rem 1rem; border-bottom: 1px solid var(--card-border); }
+    td { padding: 0.85rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.04); vertical-align: middle; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+    .code-tag {
+      font-family: var(--font-mono); font-size: 0.8rem; background: rgba(0, 0, 0, 0.4);
+      padding: 0.2rem 0.5rem; border-radius: 4px; color: var(--accent-cyan); border: 1px solid rgba(6, 182, 212, 0.2);
+    }
+    .timer-badge {
+      background: rgba(244, 63, 94, 0.2); color: var(--accent-rose); font-weight: 700;
+      padding: 0.2rem 0.5rem; border-radius: 4px; font-family: var(--font-mono); animation: pulse 1s infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+    /* ── Modals ── */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px);
+      display: none; align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal-overlay.active { display: flex; animation: fadeIn 0.2s ease-out; }
+    .modal {
+      background: #0f172a; border: 1px solid var(--card-border); border-radius: 16px;
+      width: 100%; max-width: 520px; padding: 1.75rem; box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+      position: relative; max-height: 90vh; overflow-y: auto;
+    }
+    .modal-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 0.5rem; color: #fff; }
+    .modal-desc { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem; }
+
+    /* ── Form Inputs ── */
+    .form-group { margin-bottom: 1.1rem; }
+    .form-label { display: block; font-size: 0.82rem; font-weight: 500; color: var(--text-muted); margin-bottom: 0.4rem; }
+    .form-input, .form-select {
+      width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--card-border);
+      border-radius: 8px; padding: 0.65rem 0.85rem; color: #fff; font-family: inherit; font-size: 0.9rem;
+      outline: none; transition: border-color 0.2s;
+    }
+    .form-input:focus, .form-select:focus { border-color: var(--accent-cyan); box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2); }
+
+    /* ── Toast Container ── */
+    #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 120; display: flex; flex-direction: column; gap: 0.5rem; }
+    .toast {
+      background: #1e293b; border: 1px solid var(--card-border); color: #fff; padding: 0.8rem 1.2rem;
+      border-radius: 8px; font-size: 0.85rem; box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      display: flex; align-items: center; gap: 0.5rem; animation: slideUp 0.2s ease-out;
+    }
+    .toast-success { border-left: 4px solid var(--accent-emerald); }
+    .toast-error { border-left: 4px solid var(--accent-rose); }
+    @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    /* ── Skip link (SV-061) ── */
+    .skip-link {
+      position: absolute;
+      left: 0.5rem;
+      top: -3rem;
+      z-index: 200;
+      background: var(--accent-cyan);
+      color: #06121a;
+      padding: 0.6rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: top 0.15s ease;
+    }
+    .skip-link:focus { top: 0.5rem; }
+
+    /* ── Minimum touch targets for interactive controls (SV-061) ── */
+    .nav-tab { min-height: 44px; }
+    .subnav-btn { min-height: 40px; }
+    .switch { width: 52px; height: 30px; }
+    .switch:before { height: 22px; width: 22px; left: 3px; bottom: 3px; }
+    input:checked + .slider:before { transform: translateX(22px); }
+
+    /* ── Table overflow wrapper (SV-062) ── */
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* iOS-safe-area aware padding for notched iPhones (Map #97 mobile). */
+    .nav-container { padding-left: max(1.5rem, env(safe-area-inset-left)); padding-right: max(1.5rem, env(safe-area-inset-right)); }
+
+    /* ── Responsive design (SV-062) ── */
+    /* Tablet and below: collapse header to a stacked layout. */
+    @media (max-width: 900px) {
+      .nav-container {
+        flex-wrap: wrap;
+        padding: 0.6rem 1rem;
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+        gap: 0.5rem;
+      }
+      .nav-tabs {
+        order: 3;
+        width: 100%;
+        overflow-x: auto;
+        padding: 0.3rem;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+      }
+      .nav-tabs::-webkit-scrollbar { display: none; }
+      .nav-tab { flex-shrink: 0; }
+      .user-pill { margin-left: 0; }
+      main {
+        margin: 1rem auto;
+        padding: 0 1rem;
+        padding-left: max(1rem, env(safe-area-inset-left));
+        padding-right: max(1rem, env(safe-area-inset-right));
+      }
+    }
+
+    /* Phone: single column, full-width actions, compact modal padding. */
+    @media (max-width: 600px) {
+      .card { padding: 1rem; }
+      .card-header { flex-direction: column; align-items: stretch; }
+      .modal {
+        max-width: 100%;
+        width: calc(100vw - 2rem);
+        padding: 1.1rem;
+        margin: 0.5rem;
+        max-height: 92vh;
+      }
+      .modal-close-x { top: 0.6rem; right: 0.6rem; }
+      .auth-container { margin: 1.5rem auto; }
+      .auth-card { padding: 1.25rem; }
+      #toast-container { left: 0.75rem; right: 0.75rem; bottom: 0.75rem; }
+      .toast { width: 100%; }
+      /* Avoid two-column button rows overflowing. */
+      .modal form [style*="display: flex"][style*="gap"] { flex-wrap: wrap; }
+      th, td { padding: 0.6rem 0.5rem; font-size: 0.82rem; }
+    }
+
+    /* Support 200% zoom (browser min-width 320px effective): allow wrapping. */
+    @media (max-width: 420px) {
+      .nav-tab { padding: 0.4rem 0.55rem; font-size: 0.8rem; }
+      .nav-tab-label { display: inline; }
+      h1 { font-size: 1.3rem; }
+      h2 { font-size: 1.05rem; }
+    }
+
+    /* ── Reduced motion (SV-062): disable nonessential animation. ── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+      }
+      .view-panel.active,
+      .modal-overlay.active,
+      .toast,
+      .timer-badge {
+        animation: none !important;
+      }
+      .btn-primary:hover { transform: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <a href="#dashboard-view" class="skip-link" data-action="skip-to-content">Skip to main content</a>
+
+  <!-- App Header -->
+  <header id="app-header" style="display: none;">
+    <div class="nav-container">
+      <a href="#" class="brand">
+        <div class="brand-icon">🔑</div>
+        <span>SecretVault</span>
+      </a>
+
+      <nav class="nav-tabs" role="tablist" aria-label="Vault sections" id="primary-tablist">
+        <button type="button" role="tab" class="nav-tab active" id="tab-secrets" data-target="panel-secrets" aria-controls="panel-secrets" aria-selected="true" tabindex="0">📦 <span class="nav-tab-label">Secrets</span></button>
+        <button type="button" role="tab" class="nav-tab" id="tab-clients" data-target="panel-clients" aria-controls="panel-clients" aria-selected="false" tabindex="-1">💻 <span class="nav-tab-label">Clients</span></button>
+        <button type="button" role="tab" class="nav-tab" id="tab-profiles" data-target="panel-profiles" aria-controls="panel-profiles" aria-selected="false" tabindex="-1">🔄 <span class="nav-tab-label">Services</span></button>
+        <button type="button" role="tab" class="nav-tab" id="tab-integrations" data-target="panel-integrations" aria-controls="panel-integrations" aria-selected="false" tabindex="-1">🔌 <span class="nav-tab-label">Integrations</span></button>
+        <button type="button" role="tab" class="nav-tab" id="tab-settings" data-target="panel-settings" aria-controls="panel-settings" aria-selected="false" tabindex="-1">⚙️ <span class="nav-tab-label">Settings</span></button>
+      </nav>
+
+      <div class="user-pill">
+        <span id="user-display-name">admin</span>
+        <span id="user-role-badge" class="badge-admin">Admin</span>
+        <button class="btn btn-secondary" data-action="logout" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Login / Setup Container -->
+  <div id="auth-view" class="auth-container">
+    <div style="margin-bottom: 1.5rem;">
+      <div class="brand-icon" style="width: 48px; height: 48px; font-size: 1.6rem; margin: 0 auto 0.75rem;">🔑</div>
+      <h1 style="font-size: 1.5rem; font-weight: 700; color: #fff;">SecretVault</h1>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem;">Bounded Egress Gateway & Credential Proxy</p>
+    </div>
+
+    <!-- Login Form -->
+    <div id="login-card" class="auth-card">
+      <h2 style="font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 1.25rem;">Sign In to Vault</h2>
+      <form data-submit-action="login">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input type="text" id="login-username" class="form-input" value="admin" required autofocus>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="login-password" class="form-input" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem; padding: 0.75rem;">Sign In</button>
+      </form>
+      <p style="text-align: center; margin-top: 1.25rem; font-size: 0.82rem; margin-bottom: 0;">
+        <a href="#" id="link-show-register" data-action="show-auth" data-auth-card="register" style="color: var(--accent-emerald); text-decoration: none; display: none; font-weight: 500;">Don't have an account? Sign Up</a>
+      </p>
+    </div>
+
+    <!-- Registration Form -->
+    <div id="register-card" class="auth-card" style="display: none;">
+      <h2 style="font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.4rem;">Create Account</h2>
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1.25rem;">Register a new SecretVault user account.</p>
+      <form data-submit-action="register">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input type="text" id="register-username" class="form-input" required placeholder="Choose a username">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="register-password" class="form-input" required minlength="6" placeholder="At least 6 characters">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem; padding: 0.75rem;">Register Account</button>
+      </form>
+      <p style="text-align: center; margin-top: 1.25rem; font-size: 0.82rem; margin-bottom: 0;">
+          <a href="#" data-action="show-auth" data-auth-card="login" style="color: var(--accent-cyan); text-decoration: none; font-weight: 500;">← Back to Sign In</a>
+      </p>
+    </div>
+
+    <!-- Setup Form -->
+    <div id="setup-card" class="auth-card" style="display: none;">
+      <h2 style="font-size: 1.15rem; font-weight: 600; color: #fff; margin-bottom: 0.4rem;">Initial Vault Setup</h2>
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1.25rem;">Create the master administrator account.</p>
+      <form data-submit-action="setup">
+        <div class="form-group">
+          <label class="form-label">Setup Code (from server logs)</label>
+          <input type="text" id="setup-code" class="form-input" required placeholder="setup_... (from server logs)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Admin Username</label>
+          <input type="text" id="setup-username" class="form-input" value="admin" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Admin Password</label>
+          <input type="password" id="setup-password" class="form-input" required minlength="6">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 0.5rem; padding: 0.75rem;">Initialize Vault</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Authenticated Dashboard -->
+  <main id="dashboard-view" style="display: none;">
+    
+    <!-- View 1: Secrets -->
+    <div id="panel-secrets" class="view-panel active" role="tabpanel" aria-labelledby="tab-secrets" tabindex="0">
+      <div class="card">
+        <div class="card-header" style="flex-wrap: wrap; gap: 1rem;">
+          <div>
+            <h2 class="card-title">Secret Management</h2>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Values are encrypted with AES-256-GCM. Human reveals require step-up authentication.</p>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+            <select id="filter-secret-env" class="form-input" data-change-action="reload-secrets" style="padding: 0.35rem 0.6rem; font-size: 0.82rem; width: auto;">
+              <option value="all">🌐 All Environments</option>
+              <option value="production">🟢 Production</option>
+              <option value="staging">🟡 Staging</option>
+              <option value="development">🔵 Development</option>
+            </select>
+          <button class="btn btn-primary" data-action="open-create-secret">+ Add New Secret</button>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Environment</th>
+              <th>Masked Preview</th>
+              <th>Created</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="secrets-table-body">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- View 2: Client Applications -->
+    <div id="panel-clients" class="view-panel" role="tabpanel" aria-labelledby="tab-clients" tabindex="0">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Registered Client Applications</h2>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Scoped linking keys (<code class="code-tag">sv_...</code>) for Claude Code, mobile clients, and CI/CD pipelines.</p>
+          </div>
+          <button class="btn btn-primary" data-action="open-create-client">+ Register Client App</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>App Name</th>
+              <th>Key Prefix</th>
+              <th>Scopes</th>
+              <th>Last Used</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="clients-table-body">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- View 3: Service Profiles -->
+    <div id="panel-profiles" class="view-panel" role="tabpanel" aria-labelledby="tab-profiles" tabindex="0">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">Service Profiles (Credential Proxy)</h2>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Maps reverse proxy routes (<code class="code-tag">/proxy/:service/*</code>) to upstream target URLs and secret credentials.</p>
+          </div>
+          <button class="btn btn-primary" data-action="open-create-profile">+ Create Profile</button>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Service Name</th>
+              <th>Target URL</th>
+              <th>Auth Method</th>
+              <th>Mapped Secret</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="profiles-table-body">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+<!-- View: Integrations (promoted from Settings sub-tab — SV-068) -->
+    <div id="panel-integrations" class="view-panel" role="tabpanel" aria-labelledby="tab-integrations" tabindex="0">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">🔌 Integrations</h2>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Connect AI agents, editors, and SDKs. Snippets use this server's real origin and a placeholder linking key.</p>
+          </div>
+        </div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.75rem;">Create a scoped client in <strong>Clients</strong> to obtain a real <code class="code-tag">sv_…</code> linking key, then replace <code class="code-tag">&lt;YOUR_LINKING_KEY&gt;</code> below.</p>
+        <div id="integrations-snippets"></div>
+      </div>
+    </div>
+
+    <!-- View 4: Settings & Configuration (Consolidated Docs, Security, Account & System Config) -->
+    <div id="panel-settings" class="view-panel" role="tabpanel" aria-labelledby="tab-settings" tabindex="0">
+      <!-- Settings Sub-Navigation Header -->
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; border-bottom: 1px solid var(--card-border); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div role="tablist" aria-label="Settings sections" id="settings-tablist" style="display: flex; gap: 0.4rem; flex-wrap: wrap; overflow-x: auto; -webkit-overflow-scrolling: touch;">
+          <button type="button" role="tab" id="subnav-security" class="subnav-btn active" data-action="switch-settings" data-settings-tab="security" aria-selected="true" aria-controls="setpanel-security" tabindex="0">🛡️ 2FA &amp; Passkey</button>
+          <button type="button" role="tab" id="subnav-users" class="subnav-btn" data-action="switch-settings" data-settings-tab="users" aria-selected="false" aria-controls="setpanel-users" tabindex="-1" style="display: none;">👥 Users</button>
+          <button type="button" role="tab" id="subnav-logs" class="subnav-btn" data-action="switch-settings" data-settings-tab="logs" aria-selected="false" aria-controls="setpanel-logs" tabindex="-1">📜 Logs</button>
+          <button type="button" role="tab" id="subnav-password" class="subnav-btn" data-action="switch-settings" data-settings-tab="password" aria-selected="false" aria-controls="setpanel-password" tabindex="-1">🔑 Change Password</button>
+        </div>
+      </div>
+
+      <!-- Settings Sub-Panel 1: 2FA & Passkey (security) -->
+      <div id="setpanel-security" class="settings-subpanel" role="tabpanel" aria-labelledby="subnav-security" tabindex="0">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem;">
+          <!-- Hardware Passkeys Card -->
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-header">
+              <h3 class="card-title">🔑 Hardware Passkeys (WebAuthn)</h3>
+            <button class="btn btn-primary" data-action="register-passkey">+ Add Passkey</button>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">Use Touch ID, Face ID, Windows Hello, or YubiKey hardware security tokens for 1-tap step-up auth.</p>
+
+            <table style="font-size: 0.82rem;">
+              <thead>
+                <tr>
+                  <th>Device Name</th>
+                  <th>Last Used</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="passkey-table-body">
+                <tr>
+                  <td colspan="3" style="text-align: center; color: var(--text-muted);">No passkeys registered yet. Click Add Passkey above.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Authenticator 2FA Card -->
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-header">
+              <h3 class="card-title">📱 Authenticator 2FA (TOTP)</h3>
+              <span id="totp-status-badge" class="badge-admin" style="background: rgba(156,163,175,0.2); color: var(--text-muted);">Not Configured</span>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1.25rem;">Authenticator app 2FA (Google Authenticator, Authy, 1Password) for step-up authentication.</p>
+            <p id="totp-backup-status" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem; display: none;"></p>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button id="btn-open-totp" class="btn btn-secondary" data-action="open-totp">Configure Authenticator App</button>
+              <button id="btn-regen-backup" class="btn btn-secondary" data-action="regen-backup-codes" style="display: none;">Regenerate Recovery Codes</button>
+              <button id="btn-disable-totp" class="btn btn-danger" data-action="disable-totp" style="display: none;">Disable Authenticator App</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Sub-Panel 2: Users (admin) — management + open registration toggle -->
+      <div id="setpanel-users" class="settings-subpanel" style="display: none;" role="tabpanel" aria-labelledby="subnav-users" tabindex="0">
+        <!-- System Configuration (open registration) — lives under Users per Map #98 -->
+        <div id="sysconfig-card" class="card" style="max-width: 600px; margin-bottom: 1.5rem;">
+          <div class="card-header">
+            <h3 class="card-title">🌐 System Configuration</h3>
+            <span class="badge-admin">Admin Control</span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+            <div>
+              <h4 style="font-size: 0.9rem; font-weight: 600; color: #fff;">Allow Public User Registration</h4>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">When enabled, visitors can self-register accounts on the login page.</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="setting-open-reg-toggle" data-change-action="toggle-registration">
+              <span class="slider round"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Admin Stats Overview -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+          <div class="card" style="padding: 1.25rem; margin-bottom: 0;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05rem; font-weight: 600;">Total Users</span>
+            <h3 id="stat-total-users" style="font-size: 1.6rem; font-weight: 700; color: #fff; margin-top: 0.25rem;">-</h3>
+          </div>
+          <div class="card" style="padding: 1.25rem; margin-bottom: 0;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05rem; font-weight: 600;">Total Secrets</span>
+            <h3 id="stat-total-secrets" style="font-size: 1.6rem; font-weight: 700; color: #fff; margin-top: 0.25rem;">-</h3>
+          </div>
+          <div class="card" style="padding: 1.25rem; margin-bottom: 0;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05rem; font-weight: 600;">Client Applications</span>
+            <h3 id="stat-total-clients" style="font-size: 1.6rem; font-weight: 700; color: #fff; margin-top: 0.25rem;">-</h3>
+          </div>
+          <div class="card" style="padding: 1.25rem; margin-bottom: 0;">
+            <span style="font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05rem; font-weight: 600;">Audit Trail Events</span>
+            <h3 id="stat-total-logs" style="font-size: 1.6rem; font-weight: 700; color: #fff; margin-top: 0.25rem;">-</h3>
+          </div>
+        </div>
+
+        <!-- Zero-Knowledge Security Notice -->
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1.5rem;">
+          <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+            <span style="font-size: 1.25rem;">🛡️</span>
+            <div>
+              <h4 style="font-size: 0.9rem; font-weight: 600; color: #fff;">Admin Privacy Boundary &amp; Data-Plane Isolation</h4>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Administrators can manage user lifecycle and reset credentials, but are <strong>strictly barred</strong> from viewing user secret values, previews, tags, or client linking keys.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">👥 Registered Users</h3>
+            <button class="btn btn-primary" data-action="open-add-user">+ Add New User</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Username</th>
+                  <th>Role</th>
+                  <th>Passkey (WebAuthn)</th>
+                  <th>Authenticator (TOTP)</th>
+                  <th>Created Date</th>
+                  <th style="text-align: right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="users-table-body">
+                <tr><td colspan="6" style="text-align:center; padding: 2rem; color: var(--text-muted);">Loading users...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Sub-Panel 3: Logs (audit trail / activity) -->
+      <div id="setpanel-logs" class="settings-subpanel" style="display: none;" role="tabpanel" aria-labelledby="subnav-logs" tabindex="0">
+        <div class="card">
+          <div class="card-header" style="flex-wrap: wrap; gap: 1rem;">
+            <div>
+              <h2 class="card-title">📜 Activity &amp; Audit Trail</h2>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Unified audit trail of access and changes for your account. Every read, write, reveal, and denial is logged.</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <label for="activity-outcome-filter" class="form-label" style="margin: 0; font-size: 0.78rem;">Filter</label>
+              <select id="activity-outcome-filter" class="form-input" data-change-action="filter-activity" style="padding: 0.35rem 0.6rem; font-size: 0.82rem; width: auto;">
+                <option value="all">All outcomes</option>
+                <option value="success">Success</option>
+                <option value="denied">Denied</option>
+                <option value="failed">Failed</option>
+              </select>
+              <button class="btn btn-secondary" data-action="reload-activity" style="padding: 0.35rem 0.7rem; font-size: 0.82rem;">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>Outcome</th>
+                  <th>Actor</th>
+                  <th>Request ID</th>
+                </tr>
+              </thead>
+              <tbody id="activity-table-body">
+                <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading activity…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Sub-Panel 4: Change Password -->
+      <div id="setpanel-password" class="settings-subpanel" style="display: none;" role="tabpanel" aria-labelledby="subnav-password" tabindex="0">
+        <div class="card" style="max-width: 600px; margin-bottom: 0;">
+          <div class="card-header">
+            <h3 class="card-title">🔑 Change Password</h3>
+          </div>
+          <form id="form-change-password" data-submit-action="change-password">
+            <div class="form-group">
+              <label class="form-label">Current Password</label>
+              <input type="password" id="change-current-pass" class="form-input" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">New Password</label>
+              <input type="password" id="change-new-pass" class="form-input" required minlength="6">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Confirm New Password</label>
+              <input type="password" id="change-confirm-pass" class="form-input" required minlength="6">
+            </div>
+            <button type="submit" class="btn btn-primary" style="margin-top: 0.5rem;">Update Password</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Step-Up Auth Modal (factor chooser) -->
+  <div id="modal-stepup" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-stepup">✕</button>
+      <h3 class="modal-title">🔐 Step-Up Authentication Required</h3>
+      <p class="modal-desc">Choose an enrolled factor to continue. Cancelling a passkey prompt returns you here without losing the pending operation.</p>
+
+      <div id="stepup-factor-passkey" style="display: none; margin-bottom: 1rem;">
+        <button class="btn btn-primary" style="width: 100%; justify-content: center;" data-action="verify-stepup-passkey">🔑 Use Passkey / Touch ID</button>
+      </div>
+
+      <div id="stepup-factor-totp" style="display: none; border-top: 1px solid var(--card-border); padding-top: 1rem; margin-top: 0.5rem;">
+        <label class="form-label" style="text-align: center; display: block;">Authenticator code (TOTP)</label>
+        <div class="totp-pin-container" data-pin-target="stepup-totp-code">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric" autocomplete="one-time-code">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="hidden" id="stepup-totp-code">
+        </div>
+        <button class="btn btn-secondary" data-action="verify-stepup-totp" style="width: 100%; justify-content: center; margin-top: 0.5rem;">Verify Authenticator Code</button>
+      </div>
+
+      <div id="stepup-factor-backup" style="display: none; border-top: 1px solid var(--card-border); padding-top: 1rem; margin-top: 1rem;">
+        <label class="form-label" style="text-align: center; display: block;">Or use a one-time recovery code</label>
+        <input type="text" id="stepup-backup-code" class="form-input" placeholder="10-character recovery code" autocomplete="off" spellcheck="false" style="font-family: var(--font-mono, monospace); letter-spacing: 0.05em;">
+        <button class="btn btn-secondary" data-action="verify-stepup-backup" style="width: 100%; justify-content: center; margin-top: 0.5rem;">Verify Recovery Code</button>
+      </div>
+
+      <p id="stepup-no-factors" style="display: none; color: var(--text-muted); text-align: center; font-size: 0.85rem;">No step-up factors enrolled. Configure a passkey or authenticator in Settings → Security.</p>
+
+      <button class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-stepup" style="width: 100%; margin-top: 1rem; justify-content: center;">Cancel</button>
+    </div>
+  </div>
+
+  <!-- TOTP Setup Modal -->
+  <div id="modal-totp" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="cancel-totp-setup">✕</button>
+      <h3 class="modal-title">📱 Setup Authenticator App</h3>
+      <p class="modal-desc">Scan the QR code with your authenticator app, then enter the 6-digit code. Your existing TOTP factor stays active until verification succeeds.</p>
+      
+      <div style="text-align: center; margin-bottom: 1.25rem;">
+        <img id="totp-qr-img" src="" alt="QR Code" style="width: 180px; height: 180px; border-radius: 12px; border: 2px solid var(--card-border);">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" style="text-align: center; display: block;">Enter 6-Digit Verification Code</label>
+        <div class="totp-pin-container" data-pin-target="totp-setup-code">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric" autocomplete="one-time-code">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="text" class="totp-pin-box" maxlength="1" pattern="[0-9]" inputmode="numeric">
+          <input type="hidden" id="totp-setup-code">
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+        <button class="btn btn-primary" style="flex: 1;" data-action="verify-totp-setup">Verify & Enable</button>
+        <button class="btn btn-secondary" data-action="cancel-totp-setup">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recovery Codes (shown once) -->
+  <div id="modal-backup-codes" class="modal-overlay">
+    <div class="modal" style="max-width: 520px;">
+      <h3 class="modal-title">🛡️ Save Your Recovery Codes</h3>
+      <p class="modal-desc">These one-time codes are shown <strong>exactly once</strong>. Store them offline. You will not be able to view them again.</p>
+      <pre id="backup-codes-list" style="background: var(--bg-deep, #0b1220); border: 1px solid var(--card-border); border-radius: 10px; padding: 1rem; font-family: var(--font-mono, monospace); font-size: 0.95rem; line-height: 1.7; color: #fff; white-space: pre-wrap; word-break: break-all;"></pre>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0 1rem;">
+        <button class="btn btn-secondary" data-action="copy-backup-codes">Copy</button>
+        <button class="btn btn-secondary" data-action="download-backup-codes">Download</button>
+        <button class="btn btn-secondary" data-action="print-backup-codes">Print</button>
+      </div>
+      <label style="display: flex; align-items: flex-start; gap: 0.6rem; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem; cursor: pointer;">
+        <input type="checkbox" id="backup-codes-ack" style="margin-top: 0.2rem;">
+        <span>I have saved these recovery codes in a secure place. I understand they cannot be shown again.</span>
+      </label>
+      <button id="btn-backup-codes-done" class="btn btn-primary" data-action="ack-backup-codes" style="width: 100%; justify-content: center;" disabled>Done</button>
+    </div>
+  </div>
+
+  <!-- Create Secret Modal -->
+  <div id="modal-create-secret" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-create-secret">✕</button>
+      <h3 class="modal-title">📦 Add New Secret</h3>
+      <p class="modal-desc">Value will be encrypted server-side with AES-256-GCM before database insertion.</p>
+
+      <form id="form-create-secret" data-submit-action="create-secret">
+        <div class="form-group">
+          <label class="form-label">Secret Name (e.g. ANTHROPIC_API_KEY)</label>
+          <input type="text" id="new-secret-name" class="form-input" required placeholder="MY_SECRET_NAME">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Environment</label>
+          <select id="new-secret-env" class="form-select">
+            <option value="production">Production 🟢</option>
+            <option value="staging">Staging 🟡</option>
+            <option value="development" selected>Development 🔵</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+            <label class="form-label" style="margin: 0;">Secret Value</label>
+            <button type="button" class="btn btn-secondary" data-action="random-password" data-target-id="new-secret-value" style="padding: 0.15rem 0.4rem; font-size: 0.72rem;">🎲 Random Password</button>
+          </div>
+          <div style="display: flex; gap: 0.35rem;">
+            <input type="password" id="new-secret-value" class="form-input" required placeholder="sk-..." autocomplete="off" autocorrect="off" spellcheck="false" style="flex: 1;">
+            <button type="button" class="btn btn-secondary" data-action="toggle-password" data-target-id="new-secret-value" aria-label="Show password" style="padding: 0.15rem 0.5rem; font-size: 0.72rem; min-width: 42px;">Show</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <span>Tags (comma-separated)</span>
+            <span style="font-size: 0.72rem; color: var(--text-muted);">Click pill to add tag</span>
+          </label>
+          <input type="text" id="new-secret-tags" class="form-input" placeholder="e.g. postgres, database, supa" list="existing-tags-datalist" autocomplete="off">
+          <datalist id="existing-tags-datalist"></datalist>
+          <div id="existing-tags-pills-container" style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem;">
+            <!-- Rendered dynamically by JS -->
+          </div>
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Encrypt & Save</button>
+          <button type="button" class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-create-secret">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Rotate Secret Modal -->
+  <div id="modal-rotate-secret" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-rotate-secret">✕</button>
+      <h3 class="modal-title">🔄 Update / Rotate Secret Value</h3>
+      <p class="modal-desc">Update secret value for <code id="rotate-secret-name-label" class="code-tag"></code>. This preserves the secret name so all linked Service Profiles and Client Apps continue working.</p>
+
+      <form id="form-rotate-secret" data-submit-action="rotate-secret">
+        <div class="form-group">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+            <label class="form-label" style="margin: 0;">New Secret Value</label>
+            <button type="button" class="btn btn-secondary" data-action="random-password" data-target-id="rotate-secret-value" style="padding: 0.15rem 0.4rem; font-size: 0.72rem;">🎲 Random Password</button>
+          </div>
+          <div style="display: flex; gap: 0.35rem;">
+            <input type="password" id="rotate-secret-value" class="form-input" required placeholder="Paste new key or click Random Password..." autocomplete="off" autocorrect="off" spellcheck="false" style="flex: 1;">
+            <button type="button" class="btn btn-secondary" data-action="toggle-password" data-target-id="rotate-secret-value" aria-label="Show password" style="padding: 0.15rem 0.5rem; font-size: 0.72rem; min-width: 42px;">Show</button>
+          </div>
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Save Updated Value</button>
+          <button type="button" class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-rotate-secret">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create Client App Modal -->
+  <div id="modal-create-client" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-create-client">✕</button>
+      <h3 class="modal-title">💻 Register Client Application</h3>
+      <p class="modal-desc">Generates a scoped linking key (<code class="code-tag">sv_...</code>) for Claude Code or agent integration.</p>
+
+      <form id="form-create-client" data-submit-action="create-client" autocomplete="off">
+        <div class="form-group">
+          <label class="form-label">Application Name</label>
+          <input type="text" id="new-client-name" class="form-input" required placeholder="e.g. Claude Code CLI" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span>Permissions & Capabilities</span>
+            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal;">Select scopes granted to client</span>
+          </label>
+          <div class="capabilities-grid">
+            <label class="capability-card">
+              <input class="scope-checkbox" type="checkbox" value="proxy:*" checked>
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>Credential Proxy Access</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-emerald);">proxy:*</span>
+                  <span class="tooltip-icon" data-tooltip="Recommended. Allows AI tools & clients to make authenticated API requests (e.g. qBittorrent, GitHub) via SecretVault proxy without raw passwords being exposed in AI prompt context.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Proxy authenticated requests without exposing raw secrets to AI context.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="scope-checkbox" type="checkbox" value="mcp:read" checked>
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>MCP Tools (Read Metadata)</span>
+                  <span class="code-tag" style="font-size: 0.7rem;">mcp:read</span>
+                  <span class="tooltip-icon" data-tooltip="Allows Claude or MCP clients to discover MCP tools, list secret names, and view service proxy endpoints.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Discovers MCP tool capabilities, proxy endpoints, and secret names.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="scope-checkbox" type="checkbox" value="mcp:write">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>MCP Secret Mutations</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-cyan);">mcp:write</span>
+                  <span class="tooltip-icon" data-tooltip="Allows MCP clients to create, update, rotate, or delete secrets in your vault via MCP tool calls.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Creates, updates, rotates, or deletes secrets via MCP tools.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="scope-checkbox" type="checkbox" value="secrets:metadata:read">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>HTTP Secret Metadata</span>
+                  <span class="code-tag" style="font-size: 0.7rem;">secrets:metadata:read</span>
+                  <span class="tooltip-icon" data-tooltip="Allows listing secret names, created dates, and audit info over REST HTTP API.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Lists secret names and metadata over REST HTTP API.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="scope-checkbox" type="checkbox" value="secrets:write">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>HTTP Secret Mutations</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-purple);">secrets:write</span>
+                  <span class="tooltip-icon" data-tooltip="Allows full administrative secret creation and modification over REST HTTP API.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Creates and modifies secrets directly over REST HTTP API.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Generate Linking Key</button>
+          <button type="button" class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-create-client">Cancel</button>
+        </div>
+      </form>
+
+      <!-- Key Display View -->
+      <div id="client-key-result" style="display: none; margin-top: 1rem; border-top: 1px solid var(--card-border); padding-top: 1rem;">
+        <p style="font-size: 0.85rem; color: var(--accent-emerald); font-weight: 600; margin-bottom: 0.35rem;">✅ Client Registered Successfully!</p>
+        <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem;">Copy this linking key or use one of the 1-click configuration buttons below.</p>
+        <input type="text" id="created-client-key" class="form-input" readonly style="font-family: var(--font-mono); color: var(--accent-cyan); font-size: 0.85rem; margin-bottom: 0.75rem;">
+        
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.5rem;">
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-created-mcp-cli">🤖 Claude Code CLI</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-created-antigravity">🚀 Antigravity / Agentic</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-created-mcp-json">💻 VS Code / Desktop</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-created-sdk">🔌 @secretvault/client</button>
+        </div>
+        <button type="button" class="btn btn-secondary" style="width: 100%; font-size: 0.75rem; justify-content: center; margin-bottom: 1rem;" data-action="copy-created-key">📋 Copy Raw Key Only</button>
+
+        <button type="button" class="btn btn-danger" style="width: 100%; justify-content: center;" data-action="close-modal" data-modal-id="modal-create-client">Done / Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Client App Modal -->
+  <div id="modal-edit-client" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-edit-client">✕</button>
+      <h3 class="modal-title">✏️ Edit Client Application</h3>
+      <p class="modal-desc">Modify application name or capability scopes without revoking your linking key.</p>
+
+      <form id="form-edit-client" data-submit-action="update-client" autocomplete="off">
+        <input type="hidden" id="edit-client-id">
+        <div class="form-group">
+          <label class="form-label">Application Name</label>
+          <input type="text" id="edit-client-name" class="form-input" required autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+            <span>Permissions & Capabilities</span>
+            <span style="font-size: 0.72rem; color: var(--text-muted); font-weight: normal;">Modify granted scopes</span>
+          </label>
+          <div class="capabilities-grid">
+            <label class="capability-card">
+              <input class="edit-scope-checkbox" type="checkbox" value="proxy:*">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>Credential Proxy Access</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-emerald);">proxy:*</span>
+                  <span class="tooltip-icon" data-tooltip="Recommended. Allows AI tools & clients to make authenticated API requests via SecretVault proxy without raw passwords being exposed in AI prompt context.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Proxy authenticated requests without exposing raw secrets to AI context.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="edit-scope-checkbox" type="checkbox" value="mcp:read">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>MCP Tools (Read Metadata)</span>
+                  <span class="code-tag" style="font-size: 0.7rem;">mcp:read</span>
+                  <span class="tooltip-icon" data-tooltip="Allows Claude or MCP clients to discover MCP tools, list secret names, and view service proxy endpoints.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Discovers MCP tool capabilities, proxy endpoints, and secret names.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="edit-scope-checkbox" type="checkbox" value="mcp:write">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>MCP Secret Mutations</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-cyan);">mcp:write</span>
+                  <span class="tooltip-icon" data-tooltip="Allows MCP clients to create, update, rotate, or delete secrets in your vault via MCP tool calls.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Creates, updates, rotates, or deletes secrets via MCP tools.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="edit-scope-checkbox" type="checkbox" value="secrets:metadata:read">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>HTTP Secret Metadata</span>
+                  <span class="code-tag" style="font-size: 0.7rem;">secrets:metadata:read</span>
+                  <span class="tooltip-icon" data-tooltip="Allows listing secret names, created dates, and audit info over REST HTTP API.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Lists secret names and metadata over REST HTTP API.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="edit-scope-checkbox" type="checkbox" value="secrets:write">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>HTTP Secret Mutations</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-purple);">secrets:write</span>
+                  <span class="tooltip-icon" data-tooltip="Allows full administrative secret creation and modification over REST HTTP API.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Creates and modifies secrets directly over REST HTTP API.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem; padding-top: 0.75rem; border-top: 1px solid var(--card-border);">
+          <button type="button" class="btn btn-secondary" data-action="regenerate-from-edit" style="font-size: 0.78rem; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);">🔄 Regenerate Linking Key</button>
+          <div style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <button type="button" class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-edit-client">Cancel</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Reveal Secret/Key Value Modal -->
+  <div id="modal-reveal-value" class="modal-overlay">
+    <div class="modal" style="max-width: 520px;">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-reveal-value">✕</button>
+      <h3 class="modal-title" id="reveal-modal-title">🔐 Decrypted Plaintext Value</h3>
+      <p class="modal-desc" id="reveal-modal-desc">This plaintext value has been decrypted securely in-memory.</p>
+
+      <div class="form-group" style="margin-top: 1rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.35rem;">
+          <label class="form-label" id="reveal-modal-label" style="margin: 0;">Plaintext Value</label>
+          <span id="reveal-modal-timer" class="timer-badge">Auto-closing in 15s</span>
+        </div>
+        <input type="text" id="reveal-modal-input" class="form-input" readonly style="font-family: var(--font-mono); color: var(--accent-emerald); font-size: 0.9rem; font-weight: 600; background: rgba(16, 185, 129, 0.06); border-color: rgba(16, 185, 129, 0.3);">
+      </div>
+
+      <!-- Quick Copy MCP Commands (Visible when revealing a Client App Key) -->
+      <div id="reveal-quick-copy-container" style="display: none; margin-top: 0.75rem; border-top: 1px solid var(--card-border); padding-top: 0.75rem;">
+        <label class="form-label" style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.5rem; display: block;">⚡ 1-Click Client Integration Snippets</label>
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.5rem;">
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-quick-mcp-cli">🤖 Claude Code CLI</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-quick-antigravity">🚀 Antigravity / Agentic</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-quick-mcp-json">💻 VS Code / Desktop</button>
+          <button type="button" class="btn btn-secondary" style="font-size: 0.75rem; justify-content: center;" data-action="copy-quick-sdk">🔌 @secretvault/client</button>
+        </div>
+        <button type="button" class="btn btn-secondary" style="width: 100%; font-size: 0.75rem; justify-content: center;" data-action="copy-quick-raw">📋 Copy Raw Token Only</button>
+      </div>
+
+      <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+        <button class="btn btn-primary" style="flex: 1;" data-action="copy-revealed-value">📋 Copy Raw Value</button>
+        <button class="btn btn-danger" data-action="close-modal" data-modal-id="modal-reveal-value">Done / Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Client Logs Modal -->
+  <div id="modal-client-logs" class="modal-overlay">
+    <div class="modal" style="max-width: 600px;">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-client-logs">✕</button>
+      <h3 class="modal-title">📋 Client Audit Logs</h3>
+      <p class="modal-desc" id="client-logs-title">Audit trail for client application.</p>
+      <label class="form-label" for="client-logs-outcome-filter">Filter outcome</label>
+      <select id="client-logs-outcome-filter" class="form-input" data-change-action="filter-client-logs" style="margin-bottom: 0.75rem;">
+        <option value="all">All outcomes</option>
+        <option value="succeeded">Succeeded</option>
+        <option value="failed">Failed</option>
+        <option value="denied">Denied</option>
+        <option value="unknown">Unknown</option>
+      </select>
+      <div style="max-height: 300px; overflow-y: auto;">
+        <table style="font-size: 0.8rem;">
+          <thead>
+            <tr>
+              <th>Timestamp</th>
+              <th>Access Type</th>
+              <th>Outcome</th>
+              <th>Caller</th>
+              <th>Target Secret</th>
+            </tr>
+          </thead>
+          <tbody id="client-logs-table-body">
+            <!-- Rendered by JS -->
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-secondary" style="width: 100%; margin-top: 1.25rem; justify-content: center;" data-action="close-modal" data-modal-id="modal-client-logs">Close</button>
+    </div>
+  </div>
+
+  <!-- Create Profile Modal -->
+  <div id="modal-create-profile" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-create-profile">✕</button>
+      <h3 class="modal-title">🔄 Create Service Profile</h3>
+      <p class="modal-desc">Map reverse proxy route (<code class="code-tag">/proxy/:service/*</code>) to an upstream URL and credential secret.</p>
+
+      <form id="form-create-profile" data-submit-action="create-profile">
+        <div class="form-group">
+          <label class="form-label">Service Name (e.g. qbittorrent)</label>
+          <input type="text" id="new-profile-service" class="form-input" required placeholder="qbittorrent">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Target Upstream URL</label>
+          <input type="url" id="new-profile-target" class="form-input" required placeholder="http://service.internal:8080">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Auth Method</label>
+          <select id="new-profile-auth-method" class="form-select" data-change-action="profile-auth-fields">
+            <option value="bearer">Bearer Token</option>
+            <option value="basic">Basic Auth (Username + Password)</option>
+            <option value="header">Custom Header (e.g. X-API-Key)</option>
+            <option value="cookie">Cookie (e.g. session cookie name)</option>
+          </select>
+        </div>
+
+        <div id="profile-auth-fields">
+          <!-- Dynamic Auth Inputs Rendered via JS -->
+        </div>
+
+        <details style="margin-top: 0.75rem; border-top: 1px solid var(--card-border); padding-top: 0.75rem;">
+          <summary style="cursor: pointer; color: var(--accent-cyan); font-size: 0.85rem;">⚙️ Egress & request policy (advanced)</summary>
+          <div id="profile-policy-fields" style="margin-top: 0.75rem;">
+            <div class="form-group">
+              <label class="form-label">Allowed HTTP Methods (comma-separated, blank = all supported)</label>
+              <input type="text" id="new-profile-allowed-methods" class="form-input" placeholder="GET, POST">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Allowed Path Prefixes (comma-separated, Blank = <code>/</code>)</label>
+              <input type="text" id="new-profile-allowed-paths" class="form-input" placeholder="/api/v1, /api/v2">
+            </div>
+            <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
+              <input type="checkbox" id="new-profile-allow-private-network" data-change-action="private-network-warning">
+              <label for="new-profile-allow-private-network" class="form-label" style="margin: 0;">Allow private-network destination (admin only)</label>
+            </div>
+            <p id="private-network-warning" style="display: none; font-size: 0.78rem; color: var(--accent-warning, #f0ad4e); margin-top: 0.25rem;">⚠️ Private-network destinations are reachable only by administrators. Off by default.</p>
+          </div>
+        </details>
+
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Create Profile</button>
+          <button type="button" class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-create-profile">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Confirm Action Modal -->
+  <div id="modal-confirm-action" class="modal-overlay">
+    <div class="modal" style="max-width: 450px;">
+      <h3 class="modal-title" id="confirm-modal-title">⚠️ Confirm Action</h3>
+      <p class="modal-desc" id="confirm-modal-desc">Are you sure you want to perform this action?</p>
+      <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+        <button id="confirm-modal-submit-btn" class="btn btn-danger" style="flex: 1;">Confirm Delete</button>
+        <button class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-confirm-action">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <!-- Add User Modal -->
+  <div id="modal-add-user" class="modal-overlay">
+    <div class="modal">
+      <button class="modal-close-x" data-action="close-modal" data-modal-id="modal-add-user">✕</button>
+      <h3 class="modal-title">👥 Add New User</h3>
+      <p class="modal-desc">Create a new user account with specified username and role.</p>
+      <form id="form-add-user" data-submit-action="add-user">
+        <div class="form-group">
+          <label class="form-label">Username</label>
+          <input type="text" id="new-user-username" class="form-input" required placeholder="john_doe">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="new-user-password" class="form-input" required minlength="6" placeholder="Initial password">
+        </div>
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
+          <input type="checkbox" id="new-user-is-admin" style="width: auto;">
+          <label for="new-user-is-admin" class="form-label" style="margin-bottom: 0; cursor: pointer;">Grant Administrator Privileges</label>
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Create User</button>
+          <button type="button" class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-add-user">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Admin Reset User Password Modal -->
+  <div id="modal-admin-reset-pass" class="modal-overlay">
+    <div class="modal">
+      <h3 class="modal-title">🔑 Reset User Password</h3>
+      <p class="modal-desc" id="admin-reset-pass-desc">Set a new password for <strong id="admin-reset-pass-username">target user</strong>.</p>
+      <form id="form-admin-reset-pass" data-submit-action="admin-reset-password">
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <input type="password" id="admin-reset-pass-new" class="form-input" required minlength="6" placeholder="At least 6 characters">
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 1.25rem;">
+          <button type="submit" class="btn btn-primary" style="flex: 1;">Reset Password</button>
+          <button type="button" class="btn btn-secondary" data-action="close-modal" data-modal-id="modal-admin-reset-pass">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" role="region" aria-label="Notifications" aria-live="polite" aria-atomic="false"></div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

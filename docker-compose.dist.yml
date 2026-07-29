@@ -1,0 +1,25 @@
+# Distribution Compose for SecretVault (SV-031).
+#
+# Pulls a versioned, digest-pinned registry image instead of building from
+# source. Use this for production deployments that download only the Compose
+# file + .env (no source checkout required).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dist.yml up -d
+#
+# The image tag and digest are parameterized so each release pins exactly one
+# immutable artifact. Override at deploy time:
+#
+#   SECRETVAULT_IMAGE=ghcr.io/itsaygea/secretvault:v1.2.3 \
+#   SECRETVAULT_DIGEST=sha256:... \
+#   docker compose -f docker-compose.yml -f docker-compose.dist.yml config
+#
+# (SECRETVAULT_IMAGE must be set; SECRETVAULT_DIGEST is optional but strongly
+# recommended — a digest pins the exact bytes and is immune to tag retagging.)
+services:
+  secretvault-mcp:
+    # Remove the source build: pull a published image instead. The base
+    # docker-compose.yml sets build+image; Compose merges keys, so we override
+    # build to null and image to the registry ref.
+    build: !reset null
+    image: "${SECRETVAULT_IMAGE:?SECRETVAULT_IMAGE must be set to a published SecretVault image, e.g. ghcr.io/itsaygea/secretvault:v1.0.0}${SECRETVAULT_DIGEST:+@${SECRETVAULT_DIGEST}}"
+    pull_policy: "${SECRETVAULT_PULL_POLICY:-missing}"

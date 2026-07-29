@@ -1,0 +1,24 @@
+# SecretVault accepted-risk register.
+#
+# Every vulnerability ID suppressed in .trivyignore MUST have a matching entry
+# here. The gate self-test (scripts/check-trivy-gate.mjs) refuses to pass if a
+# suppressed ID is unannotated, missing a required field, or past its
+# re-review date. Add nothing here lightly: accepted risk must be deliberate,
+# owned, scoped, and time-boxed.
+#
+# Required fields per entry:
+#   id          — CVE/GHSA/VULNID exactly as written in .trivyignore
+#   owner       — accountable engineer (GitHub handle or team)
+#   rationale   — one or two sentences on why the risk is accepted
+#   scope       — what is in scope of the acceptance (e.g. "runtime image only")
+#   expiration  — YYYY-MM-DD date this acceptance must be re-reviewed
+#
+# Example (commented — do not uncomment unless a real finding lands):
+#
+# - id: CVE-2099-12345
+#   owner: "@itsaygea"
+#   rationale: "No fixed release upstream; SecretVault never parses the affected codec at runtime."
+#   scope: "Build-time dependency only; affected binary not present in the runtime stage."
+#   expiration: "2026-10-15"
+
+accepted_risk: []

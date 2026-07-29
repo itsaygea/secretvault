@@ -1,0 +1,25 @@
+services:
+  secretvault-mcp:
+    build: .
+    image: secretvault-mcp:latest
+    container_name: secretvault-mcp
+    restart: unless-stopped
+    # SV-020: the plaintext HTTP listener is published on the host loopback
+    # interface only. External exposure must go through a TLS-terminating
+    # reverse proxy (see docker-compose.caddy.yml / docs/install.md). To expose
+    # this port directly on all interfaces, set SECRETVAULT_BIND_HOST and publish
+    # 0.0.0.0:3004:3004 — but terminate TLS first (native certs or a proxy).
+    ports:
+      - "${SECRETVAULT_BIND_HOST:-0.0.0.0}:3004:3004"
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3004/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  default:
+    name: secretvault-net

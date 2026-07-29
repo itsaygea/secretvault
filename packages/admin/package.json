@@ -1,0 +1,25 @@
+{
+  "name": "@secretvault/admin",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist", "!dist/**/*.test.*", "!dist/**/*.test.*.map"],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc"
+  },
+  "dependencies": {
+    "@secretvault/client": "0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}

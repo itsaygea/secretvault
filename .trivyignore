@@ -1,0 +1,7 @@
+# Trivy ignore list for SecretVault.
+#
+# Each CVE/GHSA listed here is suppressed by every gated scan. The gate
+# self-test (scripts/check-trivy-gate.mjs) FAILS if any ID below lacks a
+# fully annotated, unexpired entry in .github/trivy/accepted-risk.yml.
+#
+# Do not add to this file without adding the matching accepted-risk entry.

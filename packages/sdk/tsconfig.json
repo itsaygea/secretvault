@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "paths": {
+      "@secretvault/admin": ["../admin/dist/index.d.ts"],
+      "@secretvault/client": ["../client/dist/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}
