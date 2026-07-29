@@ -12,14 +12,15 @@
 
 set -eo pipefail
 
-# Attach stdin to TTY if available (required for curl | bash execution)
-if [ -t 0 ]; then
-  : # Already running in TTY
-elif [ -e /dev/tty ]; then
-  exec < /dev/tty 2>/dev/null || true
-fi
+main() {
+  # Attach stdin to TTY if available (required for curl | bash execution)
+  if [ -t 0 ]; then
+    : # Already running in TTY
+  elif [ -e /dev/tty ]; then
+    exec < /dev/tty 2>/dev/null || true
+  fi
 
-# ANSI Color Definitions
+  # ANSI Color Definitions
 BOLD="\033[1m"
 GREEN="\033[1;32m"
 CYAN="\033[1;36m"
@@ -616,3 +617,7 @@ else
   echo "Check container logs using: $DOCKER_COMPOSE_CMD ${COMPOSE_FILES[*]} logs secretvault-mcp"
   exit 1
 fi
+}
+
+main "$@"
+
