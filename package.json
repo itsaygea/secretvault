@@ -10,7 +10,7 @@
   "scripts": {
     "clean": "rm -rf packages/*/dist",
     "prebuild": "npm run clean",
-    "build": "npm run build -w @secretvault/shared && npm run build -w @secretvault/client && npm run build -w @secretvault/admin && npm run build -w @secretvault/bridge && npm run build -w @secretvault/sdk && npm run build -w @secretvault/mcp-server",
+    "build": "(cd packages/shared && npm run build) && (cd packages/client && npm run build) && (cd packages/admin && npm run build) && (cd packages/bridge && npm run build) && (cd packages/sdk && npm run build) && (cd packages/mcp-server && npm run build)",
     "check:build-reproducibility": "node scripts/check-build-reproducibility.mjs",
     "check:schema-drift": "node scripts/check-schema-drift.mjs",
     "check:openapi-drift": "node scripts/check-openapi-drift.mjs",
