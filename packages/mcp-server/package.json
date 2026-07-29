@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
+    "secretvault": "./dist/index.js",
+    "secretvault-cli": "./dist/index.js",
     "secretvault-mcp": "./dist/index.js"
   },
   "files": [

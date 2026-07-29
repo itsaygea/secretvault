@@ -28,14 +28,16 @@ if (arg === "rotate-master-key") {
 
 if (arg === "--help" || arg === "-h" || arg === "help") {
   console.log(`
-SecretVault CLI & MCP Server
+SecretVault CLI & Security Engine
 
 Usage:
-  secretvault-mcp setup                  Launch interactive developer tool setup wizard
-  secretvault-mcp secret <subcommand>   Manage secrets (list, create, rotate, delete)
-  secretvault-mcp run <args...>          Inject secrets into command execution
-  secretvault-mcp rotate-master-key      Re-encrypt stored database secrets
-  secretvault-mcp                        Start SecretVault MCP Server (requires environment vars)
+  secretvault setup                 Launch interactive developer tool setup wizard
+  secretvault secret <subcommand>  Manage secrets (list, create, rotate, delete)
+  secretvault run <args...>         Inject secrets into command execution
+  secretvault rotate-master-key     Re-encrypt stored database secrets
+  secretvault                       Start SecretVault MCP Server (requires environment vars)
+
+Aliases: secretvault, secretvault-cli, secretvault-mcp
 
 Options:
   --help, -h     Show this help message

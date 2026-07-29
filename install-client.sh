@@ -23,7 +23,7 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
-  VERSION="v0.1.4"
+  VERSION="v0.1.5"
 
   echo -e "${CYAN}"
   echo "════════════════════════════════════════════════════════════════════════"
@@ -69,18 +69,20 @@ main() {
   echo -e "${CYAN}Building packages...${RESET}"
   npm run build &>/dev/null
 
-  echo -e "${CYAN}Installing secretvault-mcp CLI binary...${RESET}"
+  echo -e "${CYAN}Installing SecretVault CLI binaries (secretvault, secretvault-cli, secretvault-mcp)...${RESET}"
   npm install -g . &>/dev/null || npm install -g . --prefix="$HOME/.local" &>/dev/null || true
 
-  if command -v secretvault-mcp &>/dev/null; then
-    echo -e "${GREEN}✓ secretvault-mcp CLI installed to PATH.${RESET}\n"
-  elif [ -x "$HOME/.local/bin/secretvault-mcp" ]; then
-    echo -e "${GREEN}✓ secretvault-mcp CLI installed to ~/.local/bin/secretvault-mcp.${RESET}"
+  if command -v secretvault &>/dev/null; then
+    echo -e "${GREEN}✓ SecretVault CLI binaries ('secretvault', 'secretvault-cli', 'secretvault-mcp') installed to PATH.${RESET}\n"
+  elif [ -x "$HOME/.local/bin/secretvault" ]; then
+    echo -e "${GREEN}✓ SecretVault CLI binaries installed to ~/.local/bin/.${RESET}"
     echo -e "${YELLOW}Note: Add ~/.local/bin to your PATH if not already present.${RESET}\n"
   fi
 
   echo -e "${GREEN}✓ Environment ready. Launching setup...${RESET}\n"
-  if command -v secretvault-mcp &>/dev/null; then
+  if command -v secretvault &>/dev/null; then
+    secretvault setup "$@"
+  elif command -v secretvault-mcp &>/dev/null; then
     secretvault-mcp setup "$@"
   else
     node packages/mcp-server/dist/index.js setup "$@"

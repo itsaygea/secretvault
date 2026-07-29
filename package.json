@@ -4,6 +4,8 @@
   "type": "module",
   "private": true,
   "bin": {
+    "secretvault": "./bin/secretvault-mcp.js",
+    "secretvault-cli": "./bin/secretvault-mcp.js",
     "secretvault-mcp": "./bin/secretvault-mcp.js"
   },
   "workspaces": ["packages/*"],
