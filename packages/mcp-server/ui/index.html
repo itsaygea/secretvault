@@ -1116,12 +1116,24 @@
           </label>
           <div class="capabilities-grid">
             <label class="capability-card">
+              <input class="scope-checkbox" type="checkbox" value="runner:secret:*" checked>
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>CLI Secret Injection</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-emerald);">runner:secret:*</span>
+                  <span class="tooltip-icon" data-tooltip="Allows secretvault run command to resolve and inject secret values into CLI tool execution.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Injects secret values into CLI command execution via secretvault run.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
               <input class="scope-checkbox" type="checkbox" value="proxy:*" checked>
               <div class="capability-info">
                 <div class="capability-title">
                   <span>Credential Proxy Access</span>
                   <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-emerald);">proxy:*</span>
-                  <span class="tooltip-icon" data-tooltip="Recommended. Allows AI tools & clients to make authenticated API requests (e.g. qBittorrent, GitHub) via SecretVault proxy without raw passwords being exposed in AI prompt context.">ℹ️</span>
+                  <span class="tooltip-icon" data-tooltip="Recommended. Allows AI tools & clients to make authenticated API requests via SecretVault proxy without raw passwords being exposed in AI prompt context.">ℹ️</span>
                 </div>
                 <div class="capability-desc">Proxy authenticated requests without exposing raw secrets to AI context.</div>
               </div>
@@ -1148,6 +1160,18 @@
                   <span class="tooltip-icon" data-tooltip="Allows MCP clients to create, update, rotate, or delete secrets in your vault via MCP tool calls.">ℹ️</span>
                 </div>
                 <div class="capability-desc">Creates, updates, rotates, or deletes secrets via MCP tools.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="scope-checkbox" type="checkbox" value="secrets:read">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>Read Secret Values</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-cyan);">secrets:read</span>
+                  <span class="tooltip-icon" data-tooltip="Allows reading unmasked secret values directly over REST HTTP API.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Reads unmasked secret values over REST HTTP API.</div>
               </div>
             </label>
 
@@ -1222,6 +1246,18 @@
           </label>
           <div class="capabilities-grid">
             <label class="capability-card">
+              <input class="edit-scope-checkbox" type="checkbox" value="runner:secret:*">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>CLI Secret Injection</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-emerald);">runner:secret:*</span>
+                  <span class="tooltip-icon" data-tooltip="Allows secretvault run command to resolve and inject secret values into CLI tool execution.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Injects secret values into CLI command execution via secretvault run.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
               <input class="edit-scope-checkbox" type="checkbox" value="proxy:*">
               <div class="capability-info">
                 <div class="capability-title">
@@ -1254,6 +1290,18 @@
                   <span class="tooltip-icon" data-tooltip="Allows MCP clients to create, update, rotate, or delete secrets in your vault via MCP tool calls.">ℹ️</span>
                 </div>
                 <div class="capability-desc">Creates, updates, rotates, or deletes secrets via MCP tools.</div>
+              </div>
+            </label>
+
+            <label class="capability-card">
+              <input class="edit-scope-checkbox" type="checkbox" value="secrets:read">
+              <div class="capability-info">
+                <div class="capability-title">
+                  <span>Read Secret Values</span>
+                  <span class="code-tag" style="font-size: 0.7rem; color: var(--accent-cyan);">secrets:read</span>
+                  <span class="tooltip-icon" data-tooltip="Allows reading unmasked secret values directly over REST HTTP API.">ℹ️</span>
+                </div>
+                <div class="capability-desc">Reads unmasked secret values over REST HTTP API.</div>
               </div>
             </label>
 
