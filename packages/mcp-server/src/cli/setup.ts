@@ -268,7 +268,7 @@ export async function handleSetupCli(): Promise<void> {
           "Content-Type": "application/json",
           Authorization: `Bearer ${sessionToken}`,
         },
-        body: JSON.stringify({ app_name: label, scopes: ["mcp:read", "mcp:write"] }),
+        body: JSON.stringify({ app_name: label, scopes: ["mcp:read", "mcp:write", "runner:secret:*", "secrets:read", "secrets:write"] }),
       });
       if (!keyRes.ok) {
         keyRes = await fetch(`${serverUrl}/api/clients`, {
@@ -277,7 +277,7 @@ export async function handleSetupCli(): Promise<void> {
             "Content-Type": "application/json",
             Authorization: `Bearer ${sessionToken}`,
           },
-          body: JSON.stringify({ app_name: label, scopes: ["mcp:read", "mcp:write"] }),
+          body: JSON.stringify({ app_name: label, scopes: ["mcp:read", "mcp:write", "runner:secret:*", "secrets:read", "secrets:write"] }),
         });
       }
 

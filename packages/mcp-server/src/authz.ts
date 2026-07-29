@@ -65,7 +65,7 @@ export function hasRunnerScope(principal: Principal, canonicalSecretName: string
   const canonical = canonicalSecretName.trim().toLowerCase();
   return principal.scopes.some(scope => {
     const s = scope.trim().toLowerCase();
-    if (s === "runner:secret:*" || s === "*") return true;
+    if (s === "runner:secret:*" || s === "*" || s === "secrets:read" || s === "secrets:manage") return true;
     if (s === `runner:secret:${canonical}`) return true;
     return false;
   });

@@ -52,7 +52,8 @@ export async function handleRunCli(): Promise<void> {
             if (data.value !== undefined) {
               resolve(data.value);
             } else {
-              reject(new Error(data.error || "Secret resolution failed"));
+              const errMsg = typeof data.error === "object" ? (data.error?.message || JSON.stringify(data.error)) : (data.error || data.message || "Secret resolution failed");
+              reject(new Error(errMsg));
             }
           } catch (e) {
             reject(e);
