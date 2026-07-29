@@ -33,7 +33,7 @@ describe("linking-key authorization", () => {
   it("enforces secret-specific runner capability and denies metadata scopes", () => {
     const metadataPrincipal: Principal = {
       ...linkingPrincipal,
-      scopes: ["secrets:metadata:read"],
+      scopes: ["mcp:read", "proxy:*", "secrets:metadata:read", "secrets:write"],
     };
     expect(hasRunnerScope(metadataPrincipal, "openai_key")).toBe(false);
 
