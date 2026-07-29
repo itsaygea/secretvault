@@ -118,6 +118,19 @@ async function promptInput(rl: readline.Interface, question: string, defaultValu
   return answer.trim() || (defaultValue ?? "");
 }
 
+function parseFlexibleJson(raw: string): Record<string, any> {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Sanitize JSONC features (comments & trailing commas before closing braces/brackets)
+    let clean = raw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:\n])\/\/.*$/gm, "$1")
+      .replace(/,(\s*[\}\]])/g, "$1");
+    return JSON.parse(clean);
+  }
+}
+
 export async function writeSafeJsonConfig(configPath: string, updateFn: (current: Record<string, any>) => Record<string, any>): Promise<void> {
   const dir = path.dirname(configPath);
   if (!fs.existsSync(dir)) {
@@ -128,7 +141,7 @@ export async function writeSafeJsonConfig(configPath: string, updateFn: (current
   if (fs.existsSync(configPath)) {
     const raw = fs.readFileSync(configPath, "utf8");
     try {
-      currentConfig = JSON.parse(raw);
+      currentConfig = parseFlexibleJson(raw);
     } catch {
       // SV-039: Preserve corrupted file before overwriting
       const corruptBackup = `${configPath}.corrupt.${Date.now()}`;

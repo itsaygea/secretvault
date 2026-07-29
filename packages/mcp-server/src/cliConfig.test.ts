@@ -139,6 +139,40 @@ args = ["-y", "@modelcontextprotocol/server-filesystem"]
     // Clean up
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it("handles JSONC config files with trailing commas and comments without corruption warning", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-jsonc-test-"));
+    const configPath = path.join(tmpDir, "opencode.json");
+
+    // Write JSONC with trailing comma and comments
+    const jsoncContent = `{
+      // Schema header
+      "$schema": "https://opencode.ai/config.json",
+      "mcpServers": {
+        "existing": { "command": "test" },
+      },
+    }`;
+    fs.writeFileSync(configPath, jsoncContent, { mode: 0o600 });
+
+    await writeSafeJsonConfig(configPath, (curr) => {
+      if (!curr.mcpServers) curr.mcpServers = {};
+      curr.mcpServers.secretvault = { command: "npx" };
+      return curr;
+    });
+
+    const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    expect(parsed.$schema).toBe("https://opencode.ai/config.json");
+    expect(parsed.mcpServers.existing.command).toBe("test");
+    expect(parsed.mcpServers.secretvault.command).toBe("npx");
+
+    // Verify NO .corrupt backup was created
+    const files = fs.readdirSync(tmpDir);
+    const corrupts = files.filter(f => f.includes(".corrupt."));
+    expect(corrupts.length).toBe(0);
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 });
 
 
