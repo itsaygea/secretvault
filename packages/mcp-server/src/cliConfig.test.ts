@@ -104,5 +104,41 @@ describe("CLI Tool Config Atomic Safe Writes", () => {
     // Clean up
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it("preserves surrounding TOML tables and comments when updating Codex config", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-toml-preserve-"));
+    const configPath = path.join(tmpDir, "config.toml");
+
+    const initialToml = `# Custom top-level comment
+[mcp_servers.postgres]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-postgres"]
+
+[mcp_servers.filesystem]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem"]
+`;
+    fs.writeFileSync(configPath, initialToml, { mode: 0o600 });
+
+    const spec = {
+      command: "npx",
+      args: ["-y", "mcp-remote", "http://localhost:3004/mcp", "--header", "Authorization: Bearer sv_key", "--allow-http"],
+    };
+
+    await writeSafeTomlConfig(configPath, "secretvault", spec);
+
+    const resultToml = fs.readFileSync(configPath, "utf8");
+
+    // Assert existing sections and comments were preserved
+    expect(resultToml).toContain("# Custom top-level comment");
+    expect(resultToml).toContain("[mcp_servers.postgres]");
+    expect(resultToml).toContain("[mcp_servers.filesystem]");
+    expect(resultToml).toContain("[mcp_servers.secretvault]");
+    expect(resultToml).toContain("Authorization: Bearer sv_key");
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 });
+
 
