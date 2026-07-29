@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { writeSafeJsonConfig } from "./cli/setup.js";
+import { writeSafeJsonConfig, writeSafeTomlConfig } from "./cli/setup.js";
 
 describe("CLI Tool Config Atomic Safe Writes", () => {
   it("creates config file with mode 0600 and pre-modification backup", async () => {
@@ -67,4 +67,42 @@ describe("CLI Tool Config Atomic Safe Writes", () => {
     // Clean up
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it("creates and updates TOML config for Codex with mode 0600", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "sv-toml-test-"));
+    const configPath = path.join(tmpDir, "config.toml");
+
+    const spec = {
+      command: "npx",
+      args: ["-y", "mcp-remote", "http://localhost:3004/mcp", "--header", "Authorization: Bearer sv_test", "--allow-http"],
+    };
+
+    await writeSafeTomlConfig(configPath, "secretvault", spec);
+
+    expect(fs.existsSync(configPath)).toBe(true);
+    const tomlContent = fs.readFileSync(configPath, "utf8");
+    expect(tomlContent).toContain("[mcp_servers.secretvault]");
+    expect(tomlContent).toContain('command = "npx"');
+    expect(tomlContent).toContain('"Authorization: Bearer sv_test"');
+
+    const stats = fs.statSync(configPath);
+    if (os.platform() !== "win32") {
+      expect(stats.mode & 0o777).toBe(0o600);
+    }
+
+    // Test update existing TOML
+    const updatedSpec = {
+      command: "npx",
+      args: ["-y", "mcp-remote", "http://localhost:3004/mcp", "--header", "Authorization: Bearer sv_updated", "--allow-http"],
+    };
+    await writeSafeTomlConfig(configPath, "secretvault", updatedSpec);
+
+    const updatedToml = fs.readFileSync(configPath, "utf8");
+    expect(updatedToml).toContain('"Authorization: Bearer sv_updated"');
+    expect(updatedToml).not.toContain('"Authorization: Bearer sv_test"');
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 });
+

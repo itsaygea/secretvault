@@ -8,7 +8,7 @@ import { promptPassword } from "./secret.js";
 interface ToolConfigSpec {
   name: string;
   configPath: string;
-  format: "mcpServers" | "mcp_config" | "claude_code";
+  format: "mcpServers" | "mcp_config" | "claude_code" | "codex";
 }
 
 function getHomeDir(): string {
@@ -46,8 +46,8 @@ function getDetectedTools(): ToolConfigSpec[] {
     },
     {
       name: "Codex",
-      configPath: path.join(home, ".codex", "config.json"),
-      format: "mcpServers",
+      configPath: path.join(home, ".codex", "config.toml"),
+      format: "codex",
     },
   ];
 
@@ -92,6 +92,44 @@ export async function writeSafeJsonConfig(configPath: string, updateFn: (current
   fs.renameSync(tmpPath, configPath);
   fs.chmodSync(configPath, 0o600);
 }
+
+export async function writeSafeTomlConfig(
+  configPath: string,
+  serverName: string,
+  configBlock: { command: string; args: string[] }
+): Promise<void> {
+  const dir = path.dirname(configPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+
+  let raw = "";
+  if (fs.existsSync(configPath)) {
+    raw = fs.readFileSync(configPath, "utf8");
+    // Create pre-modification backup
+    const backupPath = `${configPath}.bak.${Date.now()}`;
+    fs.writeFileSync(backupPath, raw, { mode: 0o600 });
+  }
+
+  const sectionHeader = `[mcp_servers.${serverName}]`;
+  const sectionContent = `${sectionHeader}\ncommand = ${JSON.stringify(configBlock.command)}\nargs = ${JSON.stringify(configBlock.args)}\n`;
+
+  let newContent = "";
+  const sectionRegex = new RegExp(`\\[mcp_servers\\.${serverName}\\][\\s\\S]*?(?=\\n\\[|$)`, "g");
+
+  if (raw.includes(sectionHeader)) {
+    newContent = raw.replace(sectionRegex, sectionContent.trim());
+  } else {
+    newContent = raw ? `${raw.trimEnd()}\n\n${sectionContent}` : sectionContent;
+  }
+
+  // Atomic file replacement with strict 0600 permissions
+  const tmpPath = `${configPath}.tmp.${Date.now()}`;
+  fs.writeFileSync(tmpPath, newContent, { mode: 0o600, encoding: "utf8" });
+  fs.renameSync(tmpPath, configPath);
+  fs.chmodSync(configPath, 0o600);
+}
+
 
 export async function handleSetupCli(): Promise<void> {
   console.log("\x1b[1;36m");
@@ -230,13 +268,17 @@ export async function handleSetupCli(): Promise<void> {
 
     for (const tool of selectedTools) {
       try {
-        await writeSafeJsonConfig(tool.configPath, (currentConfig) => {
-          if (!currentConfig.mcpServers || typeof currentConfig.mcpServers !== "object") {
-            currentConfig.mcpServers = {};
-          }
-          currentConfig.mcpServers.secretvault = secretVaultConfigBlock;
-          return currentConfig;
-        });
+        if (tool.format === "codex") {
+          await writeSafeTomlConfig(tool.configPath, "secretvault", secretVaultConfigBlock);
+        } else {
+          await writeSafeJsonConfig(tool.configPath, (currentConfig) => {
+            if (!currentConfig.mcpServers || typeof currentConfig.mcpServers !== "object") {
+              currentConfig.mcpServers = {};
+            }
+            currentConfig.mcpServers.secretvault = secretVaultConfigBlock;
+            return currentConfig;
+          });
+        }
 
         console.log(`\x1b[1;32m✓ Configured ${tool.name}\x1b[0m (${tool.configPath})`);
       } catch (err: any) {
