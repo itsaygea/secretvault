@@ -172,33 +172,54 @@ Service Profiles define how SecretVault injects credentials when proxying reques
 
 ---
 
-## 4. CLI Secret Runner for Stdio MCP Servers (`secretvault-mcp run`)
+## 4. MCP Server Integrations (Zero-Leak Stdio & Reverse Proxy)
 
-For third-party stdio MCP servers running locally via CLI commands (such as `@upstash/context7-mcp`), SecretVault provides a zero-plaintext CLI runner: `secretvault-mcp run` (or `npx @secretvault/mcp-server run`).
+SecretVault provides two zero-leak integration patterns for Model Context Protocol (MCP) servers:
 
-Instead of writing raw API keys into `.mcp.json` or `claude_desktop_config.json` on disk, the CLI runner fetches the requested secret directly from SecretVault into temporary system RAM when the process boots, and injects it into the inner command.
+### Pattern A: Reverse-Proxy Remote HTTP MCP Servers
 
-### Configuration in MCP JSON (`mcp_config.json` / `claude_desktop_config.json`)
+For remote HTTP/SSE MCP servers (e.g., `https://api.example.com/mcp/tool` requiring `Authorization: Bearer <API_KEY>`):
+
+1. **Create Service Profile**: In Web UI, create a profile `example-service` with Target URL `https://api.example.com` and Auth Type `Bearer Token` mapped to secret `EXAMPLE_API_KEY`.
+2. **Configure MCP JSON**: Point the URL to SecretVault's proxy endpoint (`/proxy/example-service/...`) and pass your linking key (`sv_...`):
 
 ```json
-"context7": {
-  "command": "secretvault-mcp",
+"example-remote-mcp": {
+  "type": "http",
+  "url": "https://vault.example.com/proxy/example-service/mcp/tool",
+  "headers": {
+    "Authorization": "Bearer sv_YOUR_LINKING_KEY"
+  }
+}
+```
+*The real API key is injected server-side by SecretVault and never exists on the local client machine.*
+
+### Pattern B: Stdio MCP Servers via CLI Runner (`secretvault run`)
+
+For third-party stdio MCP servers running locally via CLI (e.g., `@example/mcp-server`):
+
+The CLI runner fetches the requested secret directly from SecretVault into system RAM when the process boots, injecting it into `process.env` without writing plaintext secrets to disk:
+
+```json
+"example-stdio-mcp": {
+  "command": "secretvault",
   "args": [
     "run",
-    "--secret", "CONTEXT7_API_KEY",
+    "--secret", "EXAMPLE_API_KEY",
     "--",
-    "npx", "-y", "@upstash/context7-mcp", "--api-key", "$CONTEXT7_API_KEY"
+    "npx", "-y", "@example/mcp-server"
   ],
   "env": {
-    "SECRETVAULT_URL": "https://your-vault-host",
-    "SECRETVAULT_CLIENT_KEY": "sv_your_linking_key"
+    "SECRETVAULT_URL": "https://vault.example.com",
+    "SECRETVAULT_CLIENT_KEY": "sv_YOUR_LINKING_KEY"
   }
 }
 ```
 
 ### Security Guarantees
 - 🔒 **Zero Plaintext Secrets on Disk**: Config files stored on disk contain only `SECRETVAULT_CLIENT_KEY` (`sv_...`).
-- 🧠 **RAM-Only Secret Lifecycle**: The decrypted secret resides exclusively in child process RAM during execution.
+- 🧠 **RAM-Only Secret Lifecycle**: Decrypted secrets reside exclusively in process RAM during execution.
+- 🛡️ **No Arg Leakage**: Secrets are injected via environment variables (`process.env`), preventing exposure in `ps` or `/proc/<pid>/cmdline`.
 
 ---
 

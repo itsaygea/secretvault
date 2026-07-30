@@ -30,7 +30,7 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "npm run clean && tsc && cp -r ui/. dist/ui/",
+    "build": "npm run clean && tsc && chmod +x dist/index.js && cp -r ui/. dist/ui/",
     "reset-admin-password": "node dist/cli.js"
   },
   "devDependencies": {

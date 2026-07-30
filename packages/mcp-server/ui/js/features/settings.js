@@ -58,14 +58,53 @@ export function buildDocsSnippets() {
       "",
       `const res = await vault.proxy("qbittorrent", "/api/v2/torrents/info");`,
     ].join("\n"),
+    "snippet-mcp-stdio-runner": JSON.stringify(
+      {
+        mcpServers: {
+          "example-stdio-mcp": {
+            "command": "secretvault",
+            "args": [
+              "run",
+              "--secret",
+              "EXAMPLE_API_KEY",
+              "--",
+              "npx",
+              "-y",
+              "@example/mcp-server"
+            ],
+            "env": {
+              "SECRETVAULT_URL": hostUrl,
+              "SECRETVAULT_CLIENT_KEY": keyVal
+            }
+          }
+        }
+      },
+      null,
+      2
+    ),
+    "snippet-mcp-http-proxy": JSON.stringify(
+      {
+        mcpServers: {
+          "example-remote-mcp": {
+            "type": "http",
+            "url": `${hostUrl}/proxy/example-service/mcp/tool`,
+            "headers": {
+              "Authorization": `Bearer ${keyVal}`
+            }
+          }
+        }
+      },
+      null,
+      2
+    ),
     "snippet-curl": [
       `# 1. Egress Proxy:`,
       `curl -s -H "Authorization: Bearer ${keyVal}" \\`,
-      `  "${hostUrl}/proxy/zai/api/monitor/usage/quota/limit"`,
+      `  "${hostUrl}/proxy/example-service/api/v1/resource"`,
       "",
       `# 2. CLI Runner:`,
       `SECRETVAULT_URL="${hostUrl}" SECRETVAULT_CLIENT_KEY="${keyVal}" \\`,
-      `  secretvault-mcp run --secret ZAI_API_KEY -- my-command`,
+      `  secretvault-mcp run --secret EXAMPLE_API_KEY -- my-command`,
     ].join("\n"),
   };
 }
@@ -137,6 +176,8 @@ function prettySnippetLabel(id) {
     "snippet-antigravity": "Antigravity & Agentic MCP Clients (npx mcp-remote)",
     "snippet-vscode": "VS Code & Claude Desktop (npx mcp-remote)",
     "snippet-bridge": "@secretvault/client (TypeScript / Node.js SDK)",
+    "snippet-mcp-stdio-runner": "Stdio MCP Servers (Zero-Leak CLI Runner via secretvault run)",
+    "snippet-mcp-http-proxy": "HTTP Remote MCP Servers (Zero-Leak Reverse Proxy via /proxy/<service>/...)",
     "snippet-curl": "curl & Shell (Egress Proxy + CLI Runner)",
   };
   return map[id] || id;
