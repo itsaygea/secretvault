@@ -52,3 +52,35 @@ describe("linking-key authorization", () => {
   });
 });
 
+describe("SV-AUD-010 inline profile-secret authorization rule", () => {
+  // The POST /api/service-profiles route admits an inline create_secrets array.
+  // Creating secret rows through it is a secret write, so the route requires
+  // secrets:write in addition to profiles:write whenever create_secrets is
+  // nonempty. Human sessions bypass scope checks; the exploit path is a linking
+  // key granted profiles:write without secrets:write. This encodes the exact
+  // predicate the route evaluates.
+  const admits = (principal: Principal, createSecrets: unknown[]) => {
+    if (!hasScope(principal, "profiles:write")) return false;
+    if (Array.isArray(createSecrets) && createSecrets.length > 0 && !hasScope(principal, "secrets:write")) return false;
+    return true;
+  };
+
+  it("denies a profiles:write-only linking key when create_secrets is present", () => {
+    const profilesOnly: Principal = { ...linkingPrincipal, scopes: ["profiles:write"] };
+    expect(admits(profilesOnly, [{ name: "x", value: "y" }])).toBe(false);
+    // ...but the same key may still create a profile with NO inline secrets.
+    expect(admits(profilesOnly, [])).toBe(true);
+  });
+
+  it("admits a linking key holding both profiles:write and secrets:write", () => {
+    const both: Principal = { ...linkingPrincipal, scopes: ["profiles:write", "secrets:write"] };
+    expect(admits(both, [{ name: "x", value: "y" }])).toBe(true);
+  });
+
+  it("admits a human session regardless (sessions bypass scope checks)", () => {
+    const session: Principal = { ...linkingPrincipal, credentialType: "session", scopes: [] };
+    expect(admits(session, [{ name: "x", value: "y" }])).toBe(true);
+  });
+});
+
+

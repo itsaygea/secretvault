@@ -10,7 +10,7 @@ import { handleCreateProfile } from "./serviceProfiles.js";
 
 interface MockRow { [col: string]: unknown; }
 
-function buildMockSupabase(opts: { profileInsertError?: { code: string; message: string } } = {}) {
+function buildMockSupabase(opts: { profileInsertError?: { code: string; message: string }; auditUnavailable?: boolean } = {}) {
   const secrets: MockRow[] = [];
   const profiles: MockRow[] = [];
   const deletedSecrets: string[] = [];
@@ -32,6 +32,11 @@ function buildMockSupabase(opts: { profileInsertError?: { code: string; message:
           single: async () => ({ data: { id: "audit-1" }, error: null }),
           maybeSingle: async () => ({ data: { id: "audit-1" }, error: null }),
         };
+        // SV-AUD-010 test hook: when auditUnavailable, startCriticalAuditEvent's
+        // insert().select().single() returns no row → auditId null → fail-closed 503.
+        if (opts.auditUnavailable) {
+          noop.insert = () => Object.assign(Promise.resolve({ data: null, error: { message: "audit down" } }), { select: () => ({ single: async () => ({ data: null, error: { message: "audit down" } }) }) });
+        }
         return noop;
       }
       // Build a chain that records filters and supports the query shapes the
@@ -216,8 +221,62 @@ describe("SV-034 atomic profile + secret creation", () => {
       create_secrets: [{ name: "svc_pass", value: "ok" }],
     }, true, ZERO_KEY);
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect(String((res.body as any).error)).toMatch(/already exists/);
+  });
+});
+
+describe("SV-AUD-010 inline secret authorization & critical-audit lifecycle", () => {
+  it("is fail-closed when the critical audit store is unavailable (503, nothing created)", async () => {
+    vi.stubEnv("SECRETVAULT_EGRESS_ALLOWLIST", "https://api.allowed.test");
+    const supabase = buildMockSupabase({ auditUnavailable: true });
+    const res = await handleCreateProfile(supabase, "user-1", {
+      name: "svc",
+      target_url: "https://api.allowed.test/",
+      auth_method: "bearer",
+      pass_secret_name: "svc_pass",
+      create_secrets: [{ name: "svc_pass", value: "ok" }],
+    }, true, ZERO_KEY, null, "victim");
+    // createSecretValidated returns 503 AUDIT_UNAVAILABLE; nothing is written.
+    expect(res.status).toBe(503);
+    expect(supabase._secrets).toHaveLength(0);
+    expect(supabase._profiles).toHaveLength(0);
+  });
+
+  it("reuses the central validators: an oversized value aborts before any write", async () => {
+    vi.stubEnv("SECRETVAULT_EGRESS_ALLOWLIST", "https://api.allowed.test");
+    const supabase = buildMockSupabase();
+    const tooLong = "x".repeat(1_000_000);
+    const res = await handleCreateProfile(supabase, "user-1", {
+      name: "svc",
+      target_url: "https://api.allowed.test/",
+      auth_method: "bearer",
+      pass_secret_name: "svc_pass",
+      create_secrets: [{ name: "svc_pass", value: tooLong }],
+    }, true, ZERO_KEY);
+    expect(res.status).toBe(400);
+    expect(supabase._secrets).toHaveLength(0);
+  });
+
+  it("rolls back earlier inline secrets when a later one collides with an existing secret", async () => {
+    vi.stubEnv("SECRETVAULT_EGRESS_ALLOWLIST", "https://api.allowed.test");
+    const supabase = buildMockSupabase();
+    // The second inline secret collides with a pre-seeded row.
+    supabase._secrets.push({ name: "svc_pass", user_id: "user-1", id: "exists" });
+    const res = await handleCreateProfile(supabase, "user-1", {
+      name: "svc",
+      target_url: "https://api.allowed.test/",
+      auth_method: "bearer",
+      pass_secret_name: "svc_pass",
+      create_secrets: [
+        { name: "svc_user", value: "u" },
+        { name: "svc_pass", value: "p" }, // collides → 409, rolls back svc_user
+      ],
+    }, true, ZERO_KEY);
+    expect(res.status).toBe(409);
+    // svc_user was created then rolled back; the pre-seeded svc_pass remains.
+    expect(supabase._secrets.filter((s: MockRow) => s.name === "svc_user")).toHaveLength(0);
+    expect(supabase._deletedSecrets).toContain("svc_user");
   });
 });
 

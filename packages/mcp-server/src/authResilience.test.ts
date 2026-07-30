@@ -1,39 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { rateLimiter } from "./rateLimit.js";
-import { sessionRevocation } from "./sessionRevocation.js";
+import { RateLimiter, MemoryRateLimitStore, type Clock } from "./rateLimit.js";
+import { encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import { handleTotpAuthenticate, initStepUpAuth } from "./stepup.js";
-import { encryptSecret } from "@secretvault/shared";
 
 describe("Authentication Resilience, Rate Limiting & Session Revocation", () => {
-  it("rateLimiter enforces sliding window limits and returns Retry-After", () => {
-    rateLimiter.clear();
-    const opts = { windowMs: 60_000, maxRequests: 3 };
+  it("rate limiter enforces the per-window cap and returns Retry-After", async () => {
+    const store = new MemoryRateLimitStore();
+    const limiter = new RateLimiter(store);
+    const opts = { windowMs: 60_000, maxRequests: 3, cooldownMs: 5_000, maxCooldownMs: 60_000 };
 
-    expect(rateLimiter.check("ip-127.0.0.1", opts).allowed).toBe(true);
-    expect(rateLimiter.check("ip-127.0.0.1", opts).allowed).toBe(true);
-    expect(rateLimiter.check("ip-127.0.0.1", opts).allowed).toBe(true);
+    expect((await limiter.check({ scope: "login", ip: "127.0.0.1", identity: "alice" }, opts)).allowed).toBe(true);
+    expect((await limiter.check({ scope: "login", ip: "127.0.0.1", identity: "alice" }, opts)).allowed).toBe(true);
+    expect((await limiter.check({ scope: "login", ip: "127.0.0.1", identity: "alice" }, opts)).allowed).toBe(true);
 
-    const check4 = rateLimiter.check("ip-127.0.0.1", opts);
-    expect(check4.allowed).toBe(false);
-    expect(check4.retryAfterSeconds).toBeGreaterThan(0);
-  });
-
-  it("sessionRevocation invalidates sessions issued before revocation timestamp", () => {
-    sessionRevocation.clear();
-    const tokenTime = Date.now() - 1000;
-
-    expect(sessionRevocation.isTokenRevoked("user-bob", tokenTime)).toBe(false);
-
-    sessionRevocation.revokeAllUserSessions("user-bob");
-
-    expect(sessionRevocation.isTokenRevoked("user-bob", tokenTime)).toBe(true);
-    expect(sessionRevocation.isTokenRevoked("user-bob", Date.now() + 1000)).toBe(false);
+    const denied = await limiter.check({ scope: "login", ip: "127.0.0.1", identity: "alice" }, opts);
+    expect(denied.allowed).toBe(false);
+    expect(denied.retryAfterSeconds).toBeGreaterThan(0);
   });
 
   it("handleTotpAuthenticate skips backup code bcrypt scans for 6-digit TOTP inputs (SV-010)", async () => {
     const masterKey = Buffer.alloc(32, "c");
     initStepUpAuth(masterKey);
-    const { encrypted } = await encryptSecret("JBSWY3DPEHPK3PXP", masterKey);
+    const { encrypted } = await encryptSecret("JBSWY3DPEHPK3PXP", masterKey, {
+      purpose: ENCRYPTION_PURPOSE.TOTP_PENDING,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.TOTP_PENDING, { userId: "user-1", recordId: "user-1" }),
+    });
     let backupTableQueried = false;
 
     const mockSupabase: any = {

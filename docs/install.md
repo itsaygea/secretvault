@@ -292,11 +292,15 @@ tailscale serve --https=443 http://127.0.0.1:3004
 ```
 *Tailscale provisions a valid Let's Encrypt TLS certificate for `https://<node>.<tailnet>.ts.net` instantly.*
 
-The default Compose mapping also publishes port 3004 on the host's interfaces,
-so clients can connect directly through a Tailscale or NetBird address. Restrict
-port 3004 with the host firewall when HTTPS through the overlay or Caddy should
-be the only permitted entry point. A loopback-only mapping is suitable when
-Tailscale Serve or another local reverse proxy is the sole entry point.
+By default the Compose mapping publishes port 3004 on the **host loopback
+(`127.0.0.1`) only** (SV-020 / SV-AUD-001) — the listener is not reachable on
+the host's LAN interfaces. To let clients connect directly through a Tailscale
+or NetBird address, set `SECRETVAULT_PUBLISH_HOST=0.0.0.0` (and terminate TLS
+first, or acknowledge external plaintext with the two override flags). The Caddy
+overlay (`docker-compose.caddy.yml`) removes the app's host-side port 3004
+entirely so Caddy is the sole externally reachable path; a loopback-only mapping
+is likewise suitable when Tailscale Serve or another local reverse proxy is the
+sole entry point.
 
 ### Option C: Nginx Proxy Manager (NPM), Cloudflare Tunnels, or Traefik
 
@@ -330,7 +334,7 @@ services:
    ```
    *Expected Output*: `{"status":"ok"}`
 
-2. **Access Web UI**: Open `https://vault.yourdomain.com/ui` (or `http://<your-server-ip>:3004/ui`) in your browser.
+2. **Access Web UI**: Open `https://vault.yourdomain.com/ui` (loopback-only: `http://localhost:3004/ui`) in your browser. Use the HTTPS URL — the default deployment does not publish port 3004 on the host's network interfaces.
 3. **Log In**: Authenticate using username `admin` and the password set in `SECRETVAULT_UI_PASSWORD`.
 4. **Generate Linking Key**: Navigate to Security / Client Applications in the Web UI to generate your first linking key (`sv_...`) for Claude Code or developer applications.
 

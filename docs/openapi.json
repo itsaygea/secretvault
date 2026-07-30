@@ -47,11 +47,194 @@
     }
   ],
   "paths": {
-    "/v1/version": {
+    "/proxy/{profile}/{path}": {
+      "parameters": [
+        {
+          "name": "profile",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._~-]{1,64}$"
+          }
+        },
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "description": "Path remainder, treated strictly as upstream path/query data. It must not replace the configured origin.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "description": "Proxy contract: authenticate with Authorization: Bearer <linking_key>; the profile controls credential injection, allowed methods, path prefixes, destination origin, and DNS pinning. Caller query parameters pass through as query data. Caller Host, Authorization, and Connection headers are not trusted; response bodies are opaque upstream data and sensitive response headers are stripped.",
+      "x-secretvault-contract": {
+        "request_headers": "Caller headers pass through except Host, Authorization, and Connection; SecretVault injects the profile credential.",
+        "query": "Query parameters pass through unchanged as upstream query data.",
+        "redirects": "Redirects are not followed by SecretVault.",
+        "response": "Status, non-sensitive headers, and opaque upstream body are returned; upstream body sanitization is not claimed.",
+        "errors": "SecretVault-generated errors use the ErrorEnvelope schema; upstream responses retain their upstream status/body semantics."
+      },
       "get": {
-        "operationId": "getVersion",
+        "operationId": "proxyGet",
         "tags": [
-          "Version"
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "post": {
+        "operationId": "proxyPost",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "put": {
+        "operationId": "proxyPut",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "patch": {
+        "operationId": "proxyPatch",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "delete": {
+        "operationId": "proxyDelete",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "head": {
+        "operationId": "proxyHead",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        },
+        "x-sv-auth": "proxy"
+      },
+      "options": {
+        "operationId": "proxyOptions",
+        "tags": [
+          "Proxy"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "default": {
+            "$ref": "#/components/responses/Proxy"
+          }
+        }
+      }
+    },
+    "/v1/admin/stats": {
+      "get": {
+        "operationId": "getAdminStats",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
         ],
         "responses": {
           "200": {
@@ -61,7 +244,32 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "public"
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/auth/change-password": {
+      "post": {
+        "operationId": "changePassword",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ChangePassword"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
       }
     },
     "/v1/auth/login": {
@@ -84,14 +292,72 @@
         "x-sv-auth": "public"
       }
     },
-    "/v1/auth/status": {
-      "get": {
-        "operationId": "getAuthStatus",
+    "/v1/auth/reauth/password": {
+      "post": {
+        "operationId": "reauthPassword",
+        "summary": "Verify current password to mint a purpose-bound factor-enrollment grant (SV-AUD-002)",
         "tags": [
           "Auth"
         ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password",
+                  "operation"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "description": "Current account password. Sent in the body only; never persisted."
+                  },
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "totp:add",
+                      "webauthn:add"
+                    ],
+                    "description": "First-factor enrollment operation the grant authorises."
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "operationId": "register",
+        "tags": [
+          "Auth"
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/Register"
+        },
+        "responses": {
+          "201": {
             "$ref": "#/components/responses/Json"
           },
           "default": {
@@ -121,11 +387,11 @@
         "x-sv-auth": "public"
       }
     },
-    "/v1/settings/public": {
+    "/v1/auth/status": {
       "get": {
-        "operationId": "getPublicSettings",
+        "operationId": "getAuthStatus",
         "tags": [
-          "System"
+          "Auth"
         ],
         "responses": {
           "200": {
@@ -138,29 +404,9 @@
         "x-sv-auth": "public"
       }
     },
-    "/v1/auth/register": {
-      "post": {
-        "operationId": "register",
-        "tags": [
-          "Auth"
-        ],
-        "requestBody": {
-          "$ref": "#/components/requestBodies/Register"
-        },
-        "responses": {
-          "201": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "public"
-      }
-    },
-    "/v1/me": {
-      "get": {
-        "operationId": "getMe",
+    "/v1/auth/totp": {
+      "delete": {
+        "operationId": "disableTotp",
         "tags": [
           "Auth"
         ],
@@ -180,100 +426,9 @@
         "x-sv-auth": "session"
       }
     },
-    "/v1/user/logs": {
-      "get": {
-        "operationId": "listUserLogs",
-        "tags": [
-          "System"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Opaque cursor from the previous page's next_cursor."
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200
-            }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
-          },
-          {
-            "name": "access_type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "outcome",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "succeeded",
-                "failed",
-                "denied",
-                "unknown"
-              ]
-            }
-          },
-          {
-            "name": "secret_name",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "x-sv-auth": "scope"
-      }
-    },
-    "/v1/auth/change-password": {
+    "/v1/auth/totp/authenticate": {
       "post": {
-        "operationId": "changePassword",
+        "operationId": "authenticateTotp",
         "tags": [
           "Auth"
         ],
@@ -283,7 +438,7 @@
           }
         ],
         "requestBody": {
-          "$ref": "#/components/requestBodies/ChangePassword"
+          "$ref": "#/components/requestBodies/StepUpCode"
         },
         "responses": {
           "200": {
@@ -296,11 +451,11 @@
         "x-sv-auth": "session"
       }
     },
-    "/v1/settings": {
-      "get": {
-        "operationId": "getSystemSettings",
+    "/v1/auth/totp/cancel-setup": {
+      "post": {
+        "operationId": "cancelTotpSetup",
         "tags": [
-          "System"
+          "Auth"
         ],
         "security": [
           {
@@ -315,12 +470,68 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "admin_session"
-      },
-      "patch": {
-        "operationId": "updateSystemSettings",
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/regenerate-backup-codes": {
+      "post": {
+        "operationId": "regenerateTotpBackupCodes",
         "tags": [
-          "System"
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-SecretVault-StepUp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/setup": {
+      "post": {
+        "operationId": "setupTotp",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/totp/verify-setup": {
+      "post": {
+        "operationId": "verifyTotpSetup",
+        "tags": [
+          "Auth"
         ],
         "security": [
           {
@@ -328,7 +539,7 @@
           }
         ],
         "requestBody": {
-          "$ref": "#/components/requestBodies/SystemSettings"
+          "$ref": "#/components/requestBodies/TotpCode"
         },
         "responses": {
           "200": {
@@ -338,14 +549,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "admin_session"
+        "x-sv-auth": "session"
       }
     },
-    "/v1/admin/stats": {
-      "get": {
-        "operationId": "getAdminStats",
+    "/v1/auth/webauthn/authenticate-options": {
+      "post": {
+        "operationId": "getWebAuthnAuthenticationOptions",
         "tags": [
-          "System"
+          "Auth"
         ],
         "security": [
           {
@@ -360,14 +571,39 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "admin_session"
+        "x-sv-auth": "session"
       }
     },
-    "/v1/users": {
-      "get": {
-        "operationId": "listUsers",
+    "/v1/auth/webauthn/authenticate-verify": {
+      "post": {
+        "operationId": "verifyWebAuthnAuthentication",
         "tags": [
-          "Users"
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/WebAuthn"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/credentials": {
+      "get": {
+        "operationId": "listPasskeys",
+        "tags": [
+          "Auth"
         ],
         "security": [
           {
@@ -382,33 +618,63 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "admin_session",
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/credentials/{id}": {
+      "delete": {
+        "operationId": "deletePasskey",
+        "tags": [
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session",
         "parameters": [
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Opaque cursor from the previous page next_cursor."
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200
-            }
+            "$ref": "#/components/parameters/Id"
           }
         ]
-      },
+      }
+    },
+    "/v1/auth/webauthn/register-options": {
       "post": {
-        "operationId": "createUser",
+        "operationId": "getWebAuthnRegistrationOptions",
         "tags": [
-          "Users"
+          "Auth"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/auth/webauthn/register-verify": {
+      "post": {
+        "operationId": "verifyWebAuthnRegistration",
+        "tags": [
+          "Auth"
         ],
         "security": [
           {
@@ -416,64 +682,7 @@
           }
         ],
         "requestBody": {
-          "$ref": "#/components/requestBodies/User"
-        },
-        "responses": {
-          "201": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "admin_session"
-      }
-    },
-    "/v1/users/{id}": {
-      "delete": {
-        "operationId": "deleteUser",
-        "tags": [
-          "Users"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "admin_session"
-      }
-    },
-    "/v1/users/{id}/reset-password": {
-      "post": {
-        "operationId": "resetUserPassword",
-        "tags": [
-          "Users"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Id"
-          }
-        ],
-        "requestBody": {
-          "$ref": "#/components/requestBodies/PasswordReset"
+          "$ref": "#/components/requestBodies/WebAuthn"
         },
         "responses": {
           "200": {
@@ -483,68 +692,14 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "admin_session"
+        "x-sv-auth": "session"
       }
     },
-    "/v1/users/{id}/reset-2fa": {
-      "post": {
-        "operationId": "resetUserTwoFactor",
-        "tags": [
-          "Users"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "admin_session"
-      }
-    },
-    "/v1/users/{id}/linking-key": {
-      "post": {
-        "operationId": "generateLinkingKey",
-        "tags": [
-          "Users"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "self_or_admin_session"
-      }
-    },
-    "/v1/service-profiles": {
+    "/v1/client/secrets/{name}": {
       "get": {
-        "operationId": "listServiceProfiles",
+        "operationId": "resolveClientSecret",
         "tags": [
-          "Profiles"
+          "Clients"
         ],
         "security": [
           {
@@ -562,75 +717,9 @@
         "x-sv-auth": "scope",
         "parameters": [
           {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Opaque cursor from the previous page next_cursor."
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200
-            }
+            "$ref": "#/components/parameters/Name"
           }
         ]
-      },
-      "post": {
-        "operationId": "createServiceProfile",
-        "tags": [
-          "Profiles"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "$ref": "#/components/requestBodies/ServiceProfile"
-        },
-        "responses": {
-          "201": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "scope"
-      }
-    },
-    "/v1/service-profiles/{id}": {
-      "delete": {
-        "operationId": "deleteServiceProfile",
-        "tags": [
-          "Profiles"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/Id"
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "scope"
       }
     },
     "/v1/clients": {
@@ -845,209 +934,22 @@
         "x-sv-auth": "session"
       }
     },
-    "/v1/auth/webauthn/register-options": {
+    "/v1/clients/{id}/regenerate": {
       "post": {
-        "operationId": "getWebAuthnRegistrationOptions",
+        "operationId": "regenerateClientKey",
         "tags": [
-          "Auth"
+          "Clients"
         ],
         "security": [
           {
             "bearerAuth": []
           }
         ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/webauthn/register-verify": {
-      "post": {
-        "operationId": "verifyWebAuthnRegistration",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "$ref": "#/components/requestBodies/WebAuthn"
-        },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/webauthn/authenticate-options": {
-      "post": {
-        "operationId": "getWebAuthnAuthenticationOptions",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/webauthn/authenticate-verify": {
-      "post": {
-        "operationId": "verifyWebAuthnAuthentication",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "$ref": "#/components/requestBodies/WebAuthn"
-        },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/totp/setup": {
-      "post": {
-        "operationId": "setupTotp",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/totp/cancel-setup": {
-      "post": {
-        "operationId": "cancelTotpSetup",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/totp/verify-setup": {
-      "post": {
-        "operationId": "verifyTotpSetup",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "$ref": "#/components/requestBodies/TotpCode"
-        },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/totp/authenticate": {
-      "post": {
-        "operationId": "authenticateTotp",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "$ref": "#/components/requestBodies/StepUpCode"
-        },
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/totp/regenerate-backup-codes": {
-      "post": {
-        "operationId": "regenerateTotpBackupCodes",
-        "tags": [
-          "Auth"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
+        "description": "Regenerate a client application's linking key, atomically invalidating the prior key via key_version. Critical operation requiring a recent, client-bound step-up (X-SecretVault-StepUp). On a concurrent regeneration returns 409 KEY_REGENERATE_CONFLICT.",
         "parameters": [
           {
-            "name": "X-SecretVault-StepUp",
-            "in": "header",
+            "name": "id",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string"
@@ -1058,6 +960,12 @@
           "200": {
             "$ref": "#/components/responses/Json"
           },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
           "default": {
             "$ref": "#/components/responses/Error"
           }
@@ -1065,9 +973,45 @@
         "x-sv-auth": "session"
       }
     },
-    "/v1/auth/totp": {
-      "delete": {
-        "operationId": "disableTotp",
+    "/v1/clients/{id}/reveal": {
+      "post": {
+        "operationId": "revealClientKey",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Reveal a client application's plaintext linking key. Critical operation requiring a recent, client-bound step-up (X-SecretVault-StepUp). A step-up minted for a different client is rejected with 403 STEP_UP_REQUIRED.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "session"
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "operationId": "getMe",
         "tags": [
           "Auth"
         ],
@@ -1153,6 +1097,33 @@
         "x-sv-auth": "scope"
       }
     },
+    "/v1/secrets/{name}": {
+      "delete": {
+        "operationId": "deleteSecret",
+        "tags": [
+          "Secrets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
     "/v1/secrets/{name}/reveal": {
       "post": {
         "operationId": "revealSecret",
@@ -1210,11 +1181,77 @@
         "x-sv-auth": "scope"
       }
     },
-    "/v1/secrets/{name}": {
-      "delete": {
-        "operationId": "deleteSecret",
+    "/v1/service-profiles": {
+      "get": {
+        "operationId": "listServiceProfiles",
         "tags": [
-          "Secrets"
+          "Profiles"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createServiceProfile",
+        "tags": [
+          "Profiles"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/ServiceProfile"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
+    "/v1/service-profiles/{id}": {
+      "delete": {
+        "operationId": "deleteServiceProfile",
+        "tags": [
+          "Profiles"
         ],
         "security": [
           {
@@ -1223,7 +1260,7 @@
         ],
         "parameters": [
           {
-            "$ref": "#/components/parameters/Name"
+            "$ref": "#/components/parameters/Id"
           }
         ],
         "responses": {
@@ -1237,39 +1274,11 @@
         "x-sv-auth": "scope"
       }
     },
-    "/proxy/{profile}/{path}": {
-      "parameters": [
-        {
-          "name": "profile",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "pattern": "^[A-Za-z0-9._~-]{1,64}$"
-          }
-        },
-        {
-          "name": "path",
-          "in": "path",
-          "required": true,
-          "description": "Path remainder, treated strictly as upstream path/query data. It must not replace the configured origin.",
-          "schema": {
-            "type": "string"
-          }
-        }
-      ],
-      "description": "Proxy contract: authenticate with Authorization: Bearer <linking_key>; the profile controls credential injection, allowed methods, path prefixes, destination origin, and DNS pinning. Caller query parameters pass through as query data. Caller Host, Authorization, and Connection headers are not trusted; response bodies are opaque upstream data and sensitive response headers are stripped.",
-      "x-secretvault-contract": {
-        "request_headers": "Caller headers pass through except Host, Authorization, and Connection; SecretVault injects the profile credential.",
-        "query": "Query parameters pass through unchanged as upstream query data.",
-        "redirects": "Redirects are not followed by SecretVault.",
-        "response": "Status, non-sensitive headers, and opaque upstream body are returned; upstream body sanitization is not claimed.",
-        "errors": "SecretVault-generated errors use the ErrorEnvelope schema; upstream responses retain their upstream status/body semantics."
-      },
+    "/v1/settings": {
       "get": {
-        "operationId": "proxyGet",
+        "operationId": "getSystemSettings",
         "tags": [
-          "Proxy"
+          "System"
         ],
         "security": [
           {
@@ -1277,70 +1286,19 @@
           }
         ],
         "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
           "default": {
-            "$ref": "#/components/responses/Proxy"
+            "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "proxy"
-      },
-      "post": {
-        "operationId": "proxyPost",
-        "tags": [
-          "Proxy"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          }
-        },
-        "responses": {
-          "default": {
-            "$ref": "#/components/responses/Proxy"
-          }
-        },
-        "x-sv-auth": "proxy"
-      },
-      "put": {
-        "operationId": "proxyPut",
-        "tags": [
-          "Proxy"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          }
-        },
-        "responses": {
-          "default": {
-            "$ref": "#/components/responses/Proxy"
-          }
-        },
-        "x-sv-auth": "proxy"
+        "x-sv-auth": "admin_session"
       },
       "patch": {
-        "operationId": "proxyPatch",
+        "operationId": "updateSystemSettings",
         "tags": [
-          "Proxy"
+          "System"
         ],
         "security": [
           {
@@ -1348,71 +1306,17 @@
           }
         ],
         "requestBody": {
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          }
+          "$ref": "#/components/requestBodies/SystemSettings"
         },
         "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
           "default": {
-            "$ref": "#/components/responses/Proxy"
+            "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "proxy"
-      },
-      "delete": {
-        "operationId": "proxyDelete",
-        "tags": [
-          "Proxy"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "default": {
-            "$ref": "#/components/responses/Proxy"
-          }
-        },
-        "x-sv-auth": "proxy"
-      },
-      "head": {
-        "operationId": "proxyHead",
-        "tags": [
-          "Proxy"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "default": {
-            "$ref": "#/components/responses/Proxy"
-          }
-        },
-        "x-sv-auth": "proxy"
-      },
-      "options": {
-        "operationId": "proxyOptions",
-        "tags": [
-          "Proxy"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "default": {
-            "$ref": "#/components/responses/Proxy"
-          }
-        }
+        "x-sv-auth": "admin_session"
       }
     },
     "/v1/settings/audit-retention": {
@@ -1460,6 +1364,114 @@
         },
         "description": "Set bounded audit retention. A server-enforced floor prevents pruning of recent rows. Pruning is applied immediately and the count of removed rows is returned.",
         "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/settings/public": {
+      "get": {
+        "operationId": "getPublicSettings",
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
+      }
+    },
+    "/v1/user/logs": {
+      "get": {
+        "operationId": "listUserLogs",
+        "tags": [
+          "System"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page's next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "access_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "succeeded",
+                "failed",
+                "denied",
+                "unknown"
+              ]
+            }
+          },
+          {
+            "name": "secret_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-sv-auth": "scope"
       }
     },
     "/v1/user/logs/export": {
@@ -1515,86 +1527,11 @@
         "x-sv-auth": "scope"
       }
     },
-    "/v1/clients/{id}/reveal": {
-      "post": {
-        "operationId": "revealClientKey",
-        "tags": [
-          "Clients"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "description": "Reveal a client application's plaintext linking key. Critical operation requiring a recent, client-bound step-up (X-SecretVault-StepUp). A step-up minted for a different client is rejected with 403 STEP_UP_REQUIRED.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/clients/{id}/regenerate": {
-      "post": {
-        "operationId": "regenerateClientKey",
-        "tags": [
-          "Clients"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "description": "Regenerate a client application's linking key, atomically invalidating the prior key via key_version. Critical operation requiring a recent, client-bound step-up (X-SecretVault-StepUp). On a concurrent regeneration returns 409 KEY_REGENERATE_CONFLICT.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session"
-      }
-    },
-    "/v1/auth/webauthn/credentials": {
+    "/v1/users": {
       "get": {
-        "operationId": "listPasskeys",
+        "operationId": "listUsers",
         "tags": [
-          "Auth"
+          "Users"
         ],
         "security": [
           {
@@ -1609,45 +1546,94 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "session"
+        "x-sv-auth": "admin_session",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque cursor from the previous page next_cursor."
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createUser",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/User"
+        },
+        "responses": {
+          "201": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
       }
     },
-    "/v1/auth/webauthn/credentials/{id}": {
+    "/v1/users/{id}": {
       "delete": {
-        "operationId": "deletePasskey",
+        "operationId": "deleteUser",
         "tags": [
-          "Auth"
+          "Users"
         ],
         "security": [
           {
             "bearerAuth": []
           }
         ],
-        "responses": {
-          "200": {
-            "$ref": "#/components/responses/Json"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "x-sv-auth": "session",
         "parameters": [
           {
             "$ref": "#/components/parameters/Id"
           }
-        ]
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
       }
     },
-    "/v1/client/secrets/{name}": {
-      "get": {
-        "operationId": "resolveClientSecret",
+    "/v1/users/{id}/linking-key": {
+      "post": {
+        "operationId": "generateLinkingKey",
         "tags": [
-          "Clients"
+          "Users"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
           }
         ],
         "responses": {
@@ -1658,12 +1644,81 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-sv-auth": "scope",
+        "x-sv-auth": "self_or_admin_session"
+      }
+    },
+    "/v1/users/{id}/reset-2fa": {
+      "post": {
+        "operationId": "resetUserTwoFactor",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "$ref": "#/components/parameters/Name"
+            "$ref": "#/components/parameters/Id"
           }
-        ]
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/users/{id}/reset-password": {
+      "post": {
+        "operationId": "resetUserPassword",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Id"
+          }
+        ],
+        "requestBody": {
+          "$ref": "#/components/requestBodies/PasswordReset"
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "admin_session"
+      }
+    },
+    "/v1/version": {
+      "get": {
+        "operationId": "getVersion",
+        "tags": [
+          "Version"
+        ],
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "public"
       }
     }
   },

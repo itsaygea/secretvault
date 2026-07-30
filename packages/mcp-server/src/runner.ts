@@ -2,10 +2,44 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 
+/**
+ * SV-AUD-007: decide the child's environment and argv given a resolved secret.
+ *
+ * By default the secret is injected ONLY into the child environment and the
+ * command arguments are passed through verbatim — never substituted. The legacy
+ * `$SECRET` / `%SECRET%` substitution (which leaked the value into argv) is opt-
+ * in via `allowArgSubstitution`. Pure and exported so the no-leak property can
+ * be unit-tested deterministically.
+ */
+export function buildChildSpawn(
+  secretName: string,
+  secretValue: string,
+  cmdArgs: string[],
+  allowArgSubstitution: boolean,
+): { env: NodeJS.ProcessEnv; argv: string[] } {
+  const env: NodeJS.ProcessEnv = { ...process.env, [secretName]: secretValue };
+  const argv = allowArgSubstitution
+    ? cmdArgs.map(arg => arg.replace(`$${secretName}`, secretValue).replace(`%${secretName}%`, secretValue))
+    : cmdArgs;
+  return { env, argv };
+}
+
+/**
+ * SV-AUD-007: secrets are NEVER injected into the child's command-line
+ * arguments. Argument substitution (`$SECRET` / `%SECRET%`) leaked the raw
+ * value into `/proc/<pid>/cmdline`, `ps`, crash reports, and shell history.
+ *
+ * Secrets now reach the child only through its environment (and inherited file
+ * descriptors). The legacy substitution is gated behind an explicit, loudly-
+ * warned `--allow-arg-substitution` opt-in so existing scripts that genuinely
+ * require it can keep working, while the safe default never reconstructs a
+ * secret-bearing argv.
+ */
 export async function handleRunCli(): Promise<void> {
   const args = process.argv.slice(3);
 
   let secretName = "";
+  let allowArgSubstitution = false;
   const vaultUrl = process.env.SECRETVAULT_URL || "http://localhost:3004";
   const clientKey = process.env.SECRETVAULT_CLIENT_KEY || "";
 
@@ -17,6 +51,8 @@ export async function handleRunCli(): Promise<void> {
     if (optionsArgs[i] === "--secret" && optionsArgs[i + 1]) {
       secretName = optionsArgs[i + 1];
       i++;
+    } else if (optionsArgs[i] === "--allow-arg-substitution") {
+      allowArgSubstitution = true;
     }
   }
 
@@ -33,6 +69,14 @@ export async function handleRunCli(): Promise<void> {
   if (cmdArgs.length === 0) {
     console.error("[secretvault] Error: No command provided after '--'");
     process.exit(1);
+  }
+
+  if (allowArgSubstitution) {
+    console.error(
+      "[secretvault] WARNING: --allow-arg-substitution places the resolved secret into the child's " +
+      "command-line arguments, where it is visible via /proc/<pid>/cmdline and ps. Use environment-variable " +
+      "or inherited-FD injection instead. This compatibility flag may be removed in a future release.",
+    );
   }
 
   try {
@@ -64,17 +108,19 @@ export async function handleRunCli(): Promise<void> {
       req.end();
     });
 
-    const env = { ...process.env, [secretName]: secretValue };
-    const finalCmdArgs = cmdArgs.map(arg => arg.replace(`$${secretName}`, secretValue).replace(`%${secretName}%`, secretValue));
+    // SV-AUD-007: inject the secret only into the child environment, never argv.
+    // Legacy argument substitution is opt-in only.
+    const { env, argv } = buildChildSpawn(secretName, secretValue, cmdArgs, allowArgSubstitution);
 
-    const child = spawn(finalCmdArgs[0], finalCmdArgs.slice(1), {
+    const child = spawn(argv[0], argv.slice(1), {
       stdio: "inherit",
       env,
     });
 
     child.on("exit", (code) => process.exit(code ?? 0));
   } catch (err: any) {
-    console.error(`[secretvault] Failed to resolve secret '${secretName}': ${err.message || err}`);
+    // Value-free error: never echo the secret.
+    console.error(`[secretvault] Failed to resolve secret '${secretName}'.`);
     process.exit(1);
   }
 }

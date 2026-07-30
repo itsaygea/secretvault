@@ -90,6 +90,7 @@ export const ROUTES: readonly RouteSpec[] = [
   // ── Session (any authenticated user) ────────────────────────────────
   { method: "GET", path: "/v1/me", auth: "session" },
   { method: "POST", path: "/v1/auth/change-password", auth: "session" },
+  { method: "POST", path: "/v1/auth/reauth/password", auth: "session" },
   { method: "GET", path: "/v1/clients", auth: "session" },
   { method: "POST", path: "/v1/clients", auth: "session" },
   { method: "POST", path: "/v1/clients/{id}/reveal", auth: "session" },

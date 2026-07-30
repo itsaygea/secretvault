@@ -7,6 +7,10 @@ export interface Principal {
   credentialType: CredentialType;
   isAdmin: boolean;
   scopes: string[];
+  /** SV-AUD-009: client application key version, for MCP session binding. */
+  keyVersion?: number;
+  /** SV-AUD-009: user session epoch, for MCP session binding. */
+  epoch?: number;
 }
 
 export const LINKING_KEY_SCOPES = [

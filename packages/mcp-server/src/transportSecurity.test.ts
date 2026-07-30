@@ -9,6 +9,7 @@ import {
   effectiveScheme,
   isLoopback,
   plaintextStartupError,
+  publishHost,
   securityHeaders,
 } from "./transportSecurity.js";
 
@@ -74,8 +75,35 @@ describe("transport security — bind host and loopback detection", () => {
   });
 });
 
-describe("transport security — production plaintext refusal (SV-020)", () => {
-  const envKeys = ["NODE_ENV", "SECRETVAULT_BIND_HOST", "SECRETVAULT_TLS_CERT", "SECRETVAULT_TLS_KEY", "SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL", "SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL_CONFIRM"];
+describe("transport security — publish host (SV-AUD-001)", () => {
+  const original: Record<string, string | undefined> = {};
+  beforeEach(() => { for (const k of ["SECRETVAULT_BIND_HOST", "SECRETVAULT_PUBLISH_HOST"]) { original[k] = process.env[k]; delete process.env[k]; } });
+  afterEach(() => { for (const k of ["SECRETVAULT_BIND_HOST", "SECRETVAULT_PUBLISH_HOST"]) { if (original[k] === undefined) delete process.env[k]; else process.env[k] = original[k]; } });
+
+  it("falls back to the bind host when no publish host is set (bare-metal/dev)", () => {
+    process.env.SECRETVAULT_BIND_HOST = "0.0.0.0";
+    expect(publishHost()).toBe("0.0.0.0");
+  });
+
+  it("defaults to loopback when neither bind nor publish host is set", () => {
+    expect(publishHost()).toBe("127.0.0.1");
+    expect(isLoopback(publishHost())).toBe(true);
+  });
+
+  it("the publish host overrides the bind host for external-exposure judgements", () => {
+    // container binds 0.0.0.0 (proxy reaches it on the network) but publishes
+    // only on loopback — this is the safe default topology and must NOT read as
+    // externally exposed.
+    process.env.SECRETVAULT_BIND_HOST = "0.0.0.0";
+    process.env.SECRETVAULT_PUBLISH_HOST = "127.0.0.1";
+    expect(bindHost()).toBe("0.0.0.0");
+    expect(publishHost()).toBe("127.0.0.1");
+    expect(isLoopback(publishHost())).toBe(true);
+  });
+});
+
+describe("transport security — production plaintext refusal (SV-020 / SV-AUD-001)", () => {
+  const envKeys = ["NODE_ENV", "SECRETVAULT_BIND_HOST", "SECRETVAULT_PUBLISH_HOST", "SECRETVAULT_TLS_CERT", "SECRETVAULT_TLS_KEY", "SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL", "SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL_CONFIRM"];
   const original: Record<string, string | undefined> = {};
   beforeEach(() => { for (const k of envKeys) { original[k] = process.env[k]; delete process.env[k]; } });
   afterEach(() => { for (const k of envKeys) { if (original[k] === undefined) delete process.env[k]; else process.env[k] = original[k]; } });
@@ -93,13 +121,20 @@ describe("transport security — production plaintext refusal (SV-020)", () => {
     expect(plaintextStartupError(false)).toBeNull();
   });
 
+  it("allows a container that binds 0.0.0.0 but publishes on loopback (safe proxy topology)", () => {
+    process.env.NODE_ENV = "production";
+    process.env.SECRETVAULT_BIND_HOST = "0.0.0.0";
+    process.env.SECRETVAULT_PUBLISH_HOST = "127.0.0.1";
+    expect(plaintextStartupError(false)).toBeNull();
+  });
+
   it("allows plaintext anywhere outside production (local development)", () => {
     process.env.NODE_ENV = "development";
     process.env.SECRETVAULT_BIND_HOST = "0.0.0.0";
     expect(plaintextStartupError(false)).toBeNull();
   });
 
-  it("refuses externally-exposed plaintext in production without the override", () => {
+  it("refuses externally-exposed plaintext in production without the override (bare-metal bind)", () => {
     process.env.NODE_ENV = "production";
     process.env.SECRETVAULT_BIND_HOST = "0.0.0.0";
     const err = plaintextStartupError(false);
@@ -107,9 +142,18 @@ describe("transport security — production plaintext refusal (SV-020)", () => {
     expect(err).toMatch(/Refusing to start/);
   });
 
-  it("refuses the override when the confirmation is missing (no accidental empty prompt)", () => {
+  it("refuses externally-exposed plaintext when the host publish is non-loopback", () => {
     process.env.NODE_ENV = "production";
     process.env.SECRETVAULT_BIND_HOST = "0.0.0.0";
+    process.env.SECRETVAULT_PUBLISH_HOST = "0.0.0.0";
+    const err = plaintextStartupError(false);
+    expect(err).not.toBeNull();
+    expect(err).toMatch(/Refusing to start/);
+  });
+
+  it("refuses the override when the confirmation is missing (no accidental empty prompt)", () => {
+    process.env.NODE_ENV = "production";
+    process.env.SECRETVAULT_PUBLISH_HOST = "0.0.0.0";
     process.env.SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL = "1";
     // confirmation unset
     expect(plaintextStartupError(false)).not.toBeNull();
@@ -120,7 +164,7 @@ describe("transport security — production plaintext refusal (SV-020)", () => {
 
   it("allows externally-exposed plaintext only with the explicit, noisy override", () => {
     process.env.NODE_ENV = "production";
-    process.env.SECRETVAULT_BIND_HOST = "0.0.0.0";
+    process.env.SECRETVAULT_PUBLISH_HOST = "0.0.0.0";
     process.env.SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL = "1";
     process.env.SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL_CONFIRM = ALLOW_PLAINTEXT_EXTERNAL_CONFIRM;
     expect(plaintextStartupError(false)).toBeNull();

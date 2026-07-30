@@ -132,6 +132,24 @@ export function writeApiResponse(
   writeJson(res, status, status >= 400 ? toErrorEnvelope(status, body, requestId) : body, requestId, headers);
 }
 
+/**
+ * SV-AUD-003: stable body the proxy substitutes for an upstream error (4xx/5xx)
+ * so an attacker-controlled upstream can never echo an injected credential back
+ * through an error body. The upstream status code is preserved; the body is a
+ * fixed SecretVault envelope with no upstream-derived content. Streamed bytes
+ * from a failing upstream are discarded entirely.
+ */
+export function buildUpstreamErrorEnvelope(status: number, requestId: string): string {
+  return JSON.stringify({
+    error: {
+      code: statusCode(status),
+      message: "Upstream returned an error response",
+      requestId,
+      status,
+    },
+  });
+}
+
 export function writeErrorResponse(
   res: ServerResponse,
   status: number,

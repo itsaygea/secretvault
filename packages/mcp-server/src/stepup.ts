@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@secretvault/shared";
-import { decryptSecret, encryptSecret } from "@secretvault/shared";
+import { decryptSecret, encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import bcrypt from "bcryptjs";
 import { authenticator } from "otplib";
 import QRCode from "qrcode";
@@ -94,7 +94,128 @@ export function verifyStepUpTokenForResource(token: string, expectedUserId: stri
   return timingSafeEqual(shape.sig, expectedSig);
 }
 
-// ── In-Memory Challenge Cache ───────────────────────────────────────
+// ── Purpose-Bound Reauthentication Grants (SV-AUD-002) ──────────────
+//
+// Factor-management operations (enroll, replace, disable, delete) must not be
+// authorisable by a normal session alone, nor by a generic reveal step-up token.
+// Each operation requires a short-lived, purpose-bound reauth grant whose
+// operation string is folded into the HMAC signature, so a grant minted for one
+// operation (or one resource, e.g. a specific passkey id) cannot be replayed
+// against another. Grants are one-time: once consumed they are recorded in a
+// TTL-bounded set and rejected on reuse.
+//
+// Operation vocabulary (exact-match):
+//   webauthn:add            — register a new passkey (requires current password)
+//   webauthn:delete:<id>    — delete a specific passkey (requires existing factor)
+//   totp:add                — first TOTP enrollment (requires current password)
+//   totp:replace            — replace an existing TOTP factor (requires existing factor)
+//   totp:disable            — disable TOTP (requires existing factor)
+
+export type ReauthOperation =
+  | "webauthn:add"
+  | "webauthn:delete"
+  | "totp:add"
+  | "totp:replace"
+  | "totp:disable";
+
+/**
+ * True when `op` is a valid factor-management operation that an existing-factor
+ * step-up may authorise. `webauthn:delete:<id>` is accepted (resource-bound);
+ * first-enrollment operations (`webauthn:add`, `totp:add`) are NOT — those
+ * require current-password reauth, not an existing factor.
+ */
+function isFactorManagementOperation(op: string | undefined): op is string {
+  if (!op) return false;
+  if (op === "totp:replace" || op === "totp:disable") return true;
+  if (op === "webauthn:delete" || op.startsWith("webauthn:delete:")) return true;
+  return false;
+}
+
+const REAUTH_TTL_MS = 5 * 60_000; // 5-minute maximum lifetime
+// Consumed grants: nonce -> expiresAt. Pruned on access.
+const consumedGrants = new Map<string, number>();
+
+function pruneConsumedGrants(): void {
+  const now = Date.now();
+  for (const [nonce, exp] of consumedGrants) {
+    if (exp <= now) consumedGrants.delete(nonce);
+  }
+}
+
+export function generateReauthGrant(userId: string, operation: string): { grant: string; expiresAt: number } {
+  const now = Date.now();
+  const expiresAt = now + REAUTH_TTL_MS;
+  const ts = now.toString(36);
+  const nonce = crypto.randomBytes(12).toString("hex");
+  const signed = `reauth.${userId}.${operation}.${ts}.${nonce}`;
+  const sig = crypto.createHmac("sha256", STEP_UP_HMAC_KEY).update(signed).digest("hex");
+  return { grant: `${signed}.${sig}`, expiresAt };
+}
+
+/**
+ * Validate a reauth grant for an exact operation (and optional resource, e.g.
+ * the passkey id for `webauthn:delete:<id>`). Does NOT consume the grant — call
+ * {@link consumeReauthGrant} once the operation is about to be applied. Returns
+ * true only when the shape, signature, TTL, and operation/resource all match.
+ */
+export function verifyReauthGrant(
+  token: string,
+  expectedUserId: string,
+  expectedOperation: string,
+): boolean {
+  const parsed = parseReauthGrant(token, expectedUserId, expectedOperation);
+  return parsed !== null;
+}
+
+function parseReauthGrant(
+  token: string,
+  expectedUserId: string,
+  expectedOperation: string,
+): { nonce: string; signed: string; sig: string } | null {
+  if (!token || !token.startsWith("reauth.")) return null;
+  // reauth.<userId>.<operation-with-optional-:resource>.<ts>.<nonce>.<sig>
+  // operation may itself contain a colon (webauthn:delete:<id>) but no dots.
+  const parts = token.split(".");
+  if (parts.length !== 6) return null;
+  const [, userId, operation, ts, nonce, sig] = parts;
+  if (userId !== expectedUserId) return null;
+  // Exact-match the operation. <operation> uses colons (never dots) to separate
+  // the operation from an optional resource id (e.g. webauthn:delete:<passkeyId>),
+  // so the split on "." is unambiguous and no transformation is applied.
+  if (operation !== expectedOperation) return null;
+  const issueTime = parseInt(ts, 36);
+  const age = Date.now() - issueTime;
+  if (!(age >= 0 && age < REAUTH_TTL_MS)) return null;
+  const signed = `reauth.${userId}.${operation}.${ts}.${nonce}`;
+  const expectedSig = crypto.createHmac("sha256", STEP_UP_HMAC_KEY).update(signed).digest("hex");
+  if (!timingSafeEqual(sig, expectedSig)) return null;
+  return { nonce, signed, sig };
+}
+
+/**
+ * Validate AND one-time-consume a reauth grant. A grant may be used at most
+ * once; replay returns false. This is the gate factor-management handlers call
+ * immediately before mutating a factor.
+ */
+export function consumeReauthGrant(
+  token: string,
+  expectedUserId: string,
+  expectedOperation: string,
+): boolean {
+  pruneConsumedGrants();
+  const parsed = parseReauthGrant(token, expectedUserId, expectedOperation);
+  if (!parsed) return false;
+  if (consumedGrants.has(parsed.nonce)) return false;
+  consumedGrants.set(parsed.nonce, Date.now() + REAUTH_TTL_MS);
+  return true;
+}
+
+// Test-only hook to reset consumed-grant state between unit tests.
+export function _resetReauthGrantStateForTests(): void {
+  consumedGrants.clear();
+}
+
+
 
 const challengeCache = new Map<string, { challenge: string; expiresAt: number }>();
 
@@ -239,9 +360,9 @@ export async function handleWebAuthnAuthVerify(
   userId: string,
   rpID: string,
   origin: string,
-  body: { response?: any; resource?: string },
+  body: { response?: any; resource?: string; operation?: string },
 ): Promise<{ status: number; body: unknown }> {
-  const { response, resource } = body;
+  const { response, resource, operation } = body;
   if (!response) return { status: 400, body: { error: "response is required" } };
 
   const expectedChallenge = getChallenge(userId);
@@ -296,10 +417,70 @@ export async function handleWebAuthnAuthVerify(
   });
 
   const { stepUpToken, expiresAt } = generateStepUpToken(userId, resource);
-  return { status: 200, body: { verified: true, stepUpToken, expiresAt } };
+  // SV-AUD-002: when an existing-factor step-up is performed to authorise a
+  // factor-management operation, also mint a purpose-bound reauth grant for it.
+  // The reveal step-up is unchanged when no operation is requested.
+  const reauth = isFactorManagementOperation(operation)
+    ? generateReauthGrant(userId, operation!)
+    : null;
+  return {
+    status: 200,
+    body: reauth
+      ? { verified: true, grant: reauth.grant, operation, expiresAt: reauth.expiresAt }
+      : { verified: true, stepUpToken, expiresAt },
+  };
 }
 
-// ── TOTP Handlers ───────────────────────────────────────────────────
+/**
+ * SV-AUD-002: verify the user's current password and mint a purpose-bound
+ * reauthentication grant for a first-factor enrollment operation
+ * (`totp:add` / `webauthn:add`). A long-lived session alone must not be enough to
+ * add a first factor — the operator must prove knowledge of the current password
+ * immediately before enrollment. The grant is bound to exactly one operation.
+ */
+export async function handleVerifyPasswordReauth(
+  supabase: SupabaseClient<any, "secretvault">,
+  userId: string,
+  body: { password?: string; operation?: string },
+): Promise<{ status: number; body: unknown }> {
+  const { password, operation } = body;
+  if (!password) return { status: 400, body: { error: "password is required" } };
+  if (operation !== "totp:add" && operation !== "webauthn:add") {
+    return { status: 400, body: { error: "Unsupported operation for password reauthentication" } };
+  }
+
+  const { data: user } = await supabase
+    .from("users")
+    .select("password_hash")
+    .eq("id", userId)
+    .single();
+  if (!user?.password_hash) return { status: 401, body: { error: "Invalid password" } };
+
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) {
+    await recordAuditEvent(supabase, {
+      userId,
+      accessType: "reauth_password_failed",
+      caller: "webui:reauth",
+      outcome: "failed",
+      metadata: { operation },
+    }).catch(() => undefined);
+    return { status: 401, body: { error: "Invalid password" } };
+  }
+
+  await recordAuditEvent(supabase, {
+    userId,
+    accessType: "reauth_password_ok",
+    caller: "webui:reauth",
+    outcome: "succeeded",
+    metadata: { operation },
+  }).catch(() => undefined);
+
+  const { grant, expiresAt } = generateReauthGrant(userId, operation);
+  return { status: 200, body: { verified: true, grant, operation, expiresAt } };
+}
+
+
 
 const TOTP_PENDING_TTL_MS = 15 * 60_000;
 const BACKUP_CODE_COUNT = 8;
@@ -380,7 +561,10 @@ export async function handleTotpSetup(
   const secret = authenticator.generateSecret();
   const otpauth = authenticator.keyuri(username, "SecretVault", secret);
   const qrCodeDataUrl = await QRCode.toDataURL(otpauth);
-  const { encrypted } = await encryptSecret(secret, masterKey);
+  const { encrypted } = await encryptSecret(secret, masterKey, {
+    purpose: ENCRYPTION_PURPOSE.TOTP_PENDING,
+    aad: buildContextAad(ENCRYPTION_PURPOSE.TOTP_PENDING, { userId, recordId: userId }),
+  });
   const expiresAt = new Date(Date.now() + TOTP_PENDING_TTL_MS).toISOString();
 
   const { data: existing } = await supabase
@@ -462,7 +646,10 @@ export async function handleTotpVerifySetup(
     return { status: 400, body: { error: "TOTP setup expired. Start setup again." } };
   }
 
-  const secret = await decryptSecret(pending.secret_encrypted, masterKey);
+  const secret = await decryptSecret(pending.secret_encrypted, masterKey, {
+    purpose: ENCRYPTION_PURPOSE.TOTP_PENDING,
+    aad: buildContextAad(ENCRYPTION_PURPOSE.TOTP_PENDING, { userId, recordId: userId }),
+  });
   const valid = authenticator.verify({ token: code, secret });
 
   if (!valid) {
@@ -508,9 +695,9 @@ export async function handleTotpAuthenticate(
   supabase: SupabaseClient<any, "secretvault">,
   masterKey: Buffer,
   userId: string,
-  body: { code?: string; resource?: string },
+  body: { code?: string; resource?: string; operation?: string },
 ): Promise<{ status: number; body: unknown }> {
-  const { code, resource } = body;
+  const { code, resource, operation } = body;
   if (!code) return { status: 400, body: { error: "code is required" } };
 
   const { data: totp } = await supabase
@@ -528,7 +715,10 @@ export async function handleTotpAuthenticate(
 
   // Try 6-digit TOTP code (SV-010: skip backup bcrypt for pure 6-digit input)
   if (trimmed.length === 6 && /^[0-9]{6}$/.test(trimmed)) {
-    const secret = await decryptSecret(totp.secret_encrypted, masterKey);
+    const secret = await decryptSecret(totp.secret_encrypted, masterKey, {
+      purpose: ENCRYPTION_PURPOSE.TOTP_PENDING,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.TOTP_PENDING, { userId, recordId: userId }),
+    });
     isValid = authenticator.verify({ token: trimmed, secret });
   }
 
@@ -556,7 +746,17 @@ export async function handleTotpAuthenticate(
   });
 
   const { stepUpToken, expiresAt } = generateStepUpToken(userId, resource);
-  return { status: 200, body: { verified: true, stepUpToken, expiresAt } };
+  // SV-AUD-002: an existing-factor step-up requested for a factor-management
+  // operation also mints a purpose-bound reauth grant for that operation.
+  const reauth = isFactorManagementOperation(operation)
+    ? generateReauthGrant(userId, operation!)
+    : null;
+  return {
+    status: 200,
+    body: reauth
+      ? { verified: true, grant: reauth.grant, operation, expiresAt: reauth.expiresAt }
+      : { verified: true, stepUpToken, expiresAt },
+  };
 }
 
 export async function handleTotpRegenerateBackupCodes(

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@secretvault/shared";
-import { encryptSecret, decryptSecret, maskSecret, generatePrefixSuffix, validateSecretName, canonicalName } from "@secretvault/shared";
+import { encryptSecret, decryptSecret, maskSecret, generatePrefixSuffix, validateSecretName, canonicalName, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import { authenticateUser, authenticateLinkingKey } from "./users.js";
 import { verifyStepUpToken } from "./stepup.js";
 import { normalizeScopes, type Principal } from "./authz.js";
@@ -15,7 +15,7 @@ import {
   validateTags,
   validationErrorResponse,
 } from "./validation.js";
-import { clampPageSize, decodeCursor, encodeCursor, paginateQuery, type PaginationParams } from "./pagination.js";
+import { clampPageSize, decodeCursor, encodeCursor, escapePostgrestValue, paginateQuery, type PaginationParams } from "./pagination.js";
 
 // ── Auth helpers ────────────────────────────────────────────────────
 
@@ -43,22 +43,34 @@ function timingSafeEqual(a: string, b: string): boolean {
   return crypto.timingSafeEqual(paddedA, paddedB);
 }
 
-export function generateToken(userId: string): string {
+export function generateToken(userId: string, epoch: number = 0): string {
   const ts = Date.now().toString(36);
   const nonce = crypto.randomBytes(8).toString("hex");
-  const sig = crypto.createHmac("sha256", TOKEN_HMAC_KEY).update(`${userId}.${ts}.${nonce}`).digest("hex");
-  return `${userId}.${ts}.${nonce}.${sig}`;
+  const sig = crypto.createHmac("sha256", TOKEN_HMAC_KEY).update(`${userId}.${epoch}.${ts}.${nonce}`).digest("hex");
+  return `${userId}.${epoch}.${ts}.${nonce}.${sig}`;
 }
 
-export function verifyToken(token: string): { userId: string; valid: boolean } {
+export function verifyToken(token: string): { userId: string; epoch: number | null; valid: boolean } {
   const parts = token.split(".");
-  if (parts.length !== 4) return { userId: "", valid: false };
-  const [userId, ts, nonce, sig] = parts;
-  const expected = crypto.createHmac("sha256", TOKEN_HMAC_KEY).update(`${userId}.${ts}.${nonce}`).digest("hex");
-  if (!timingSafeEqual(sig, expected)) return { userId: "", valid: false };
+  // SV-AUD-002: 5-part tokens carry the session epoch (userId.epoch.ts.nonce.sig).
+  // Legacy 4-part tokens (no epoch) are accepted only as epoch 0 so the cutover
+  // is forward-only; once a user's epoch is bumped, all their old 4-part tokens
+  // are rejected because the DB epoch no longer matches the implicit 0.
+  let userId: string, epoch: number, ts: string, nonce: string, sig: string;
+  if (parts.length === 5) {
+    [userId, epoch, ts, nonce, sig] = [parts[0], Number(parts[1]), parts[2], parts[3], parts[4]];
+    if (!Number.isFinite(epoch)) return { userId: "", epoch: null, valid: false };
+  } else if (parts.length === 4) {
+    [userId, ts, nonce, sig] = parts;
+    epoch = 0;
+  } else {
+    return { userId: "", epoch: null, valid: false };
+  }
+  const expected = crypto.createHmac("sha256", TOKEN_HMAC_KEY).update(`${userId}.${epoch}.${ts}.${nonce}`).digest("hex");
+  if (!timingSafeEqual(sig, expected)) return { userId: "", epoch: null, valid: false };
   const age = Date.now() - parseInt(ts, 36);
-  if (age >= 86_400_000) return { userId: "", valid: false };
-  return { userId, valid: true };
+  if (age >= 86_400_000) return { userId: "", epoch: null, valid: false };
+  return { userId, epoch, valid: true };
 }
 
 export function getAuthHeader(req: { headers: Record<string, string | string[] | undefined> }): string | null {
@@ -91,16 +103,20 @@ export async function resolveAuthContext(
   }
 
   // Try session token
-  const { userId, valid } = verifyToken(raw);
+  const { userId, epoch, valid } = verifyToken(raw);
   if (!valid) return null;
 
   const { data: user } = await supabase
     .from("users")
-    .select("id, username, is_admin")
+    .select("id, username, is_admin, session_epoch")
     .eq("id", userId)
     .single();
 
   if (!user) return null;
+  // SV-AUD-002: reject tokens minted under a prior session epoch. After a factor
+  // replacement/removal the epoch is bumped, invalidating every older token.
+  const dbEpoch = user.session_epoch ?? 0;
+  if (epoch !== dbEpoch) return null;
   return {
     userId: user.id,
     username: user.username,
@@ -148,7 +164,7 @@ export async function handleAuthLogin(
     actorUsername: user.username,
   }).catch(() => undefined);
 
-  return { status: 200, body: { token: generateToken(user.id), user: { id: user.id, username: user.username, is_admin: user.is_admin } } };
+  return { status: 200, body: { token: generateToken(user.id, user.session_epoch ?? 0), user: { id: user.id, username: user.username, is_admin: user.is_admin } } };
 }
 
 export async function handleListSecrets(
@@ -165,9 +181,12 @@ export async function handleListSecrets(
 
   if (query.cursor) {
     const decoded = decodeCursor(query.cursor);
-    if (decoded) {
-      q = q.or(`name.gt.${decoded.after},and(name.eq.${decoded.after},id.gt.${decoded.tiebreaker})`);
+    if (!decoded) {
+      // SV-AUD-014: reject tampered / malformed / unsigned cursors rather than
+      // silently falling back to the first page.
+      return { status: 400, body: { error: "Invalid cursor", code: "INVALID_CURSOR" } };
     }
+    q = q.or(`name.gt.${escapePostgrestValue(decoded.after)},and(name.eq.${escapePostgrestValue(decoded.after)},id.gt.${escapePostgrestValue(decoded.tiebreaker)})`);
   }
 
   q = q.order("name").order("id");
@@ -280,7 +299,7 @@ export async function handleCreateSecret(
   }
 }
 
-async function createSecretValidated(
+export async function createSecretValidated(
   supabase: SupabaseClient<Database, "secretvault">,
   masterKey: Buffer,
   displayName: string,
@@ -308,11 +327,18 @@ async function createSecretValidated(
   if (!auditId) return { status: 503, body: { error: "Audit logging unavailable; operation blocked", code: "AUDIT_UNAVAILABLE" } };
 
   try {
-    const { encrypted } = await encryptSecret(value, masterKey);
+    // SV-AUD-005: generate the immutable record id before encryption so the
+    // ciphertext is bound to (userId, secretId) via AAD.
+    const secretId = crypto.randomUUID();
+    const { encrypted } = await encryptSecret(value, masterKey, {
+      purpose: ENCRYPTION_PURPOSE.SECRET,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.SECRET, { userId, recordId: secretId }),
+    });
     const masked = maskSecret(value);
     const { prefix, suffix } = generatePrefixSuffix(value);
 
     const { error } = await supabase.from("secrets").insert({
+      id: secretId,
       name,
       display_name: displayName,
       user_id: userId,
@@ -379,7 +405,10 @@ export async function handleRotateSecret(
   if (!auditId) return { status: 503, body: { error: "Audit logging unavailable; operation blocked", code: "AUDIT_UNAVAILABLE" } };
 
   try {
-    const { encrypted } = await encryptSecret(new_value, masterKey);
+    const { encrypted } = await encryptSecret(new_value, masterKey, {
+      purpose: ENCRYPTION_PURPOSE.SECRET,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.SECRET, { userId, recordId: existing.id }),
+    });
     const masked = maskSecret(new_value);
     const { prefix, suffix } = generatePrefixSuffix(new_value);
 
@@ -509,7 +538,10 @@ export async function handleRevealSecret(
   if (!auditId) return { status: 503, body: { error: "Audit logging unavailable; operation blocked", code: "AUDIT_UNAVAILABLE" } };
 
   try {
-    const plaintext = await decryptSecret(existing.encrypted_blob, masterKey);
+    const plaintext = await decryptSecret(existing.encrypted_blob, masterKey, {
+      purpose: ENCRYPTION_PURPOSE.SECRET,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.SECRET, { userId, recordId: existing.id }),
+    });
 
     if (!(await finishAuditEvent(supabase, auditId, "succeeded"))) {
       return { status: 503, body: { error: "Audit logging unavailable; reveal blocked", code: "AUDIT_UNAVAILABLE" } };
@@ -559,7 +591,10 @@ export async function handleClientGetSecret(
   if (!auditId) return { status: 503, body: { error: "Audit logging unavailable; operation blocked", code: "AUDIT_UNAVAILABLE" } };
 
   try {
-    const value = await decryptSecret(existing.encrypted_blob, masterKey);
+    const value = await decryptSecret(existing.encrypted_blob, masterKey, {
+      purpose: ENCRYPTION_PURPOSE.SECRET,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.SECRET, { userId, recordId: existing.id }),
+    });
     await finishAuditEvent(supabase, auditId, "succeeded");
     return {
       status: 200,

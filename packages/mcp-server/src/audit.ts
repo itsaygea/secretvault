@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@secretvault/shared";
+import { decodeBeforeCursor, encodeBeforeCursor, escapePostgrestValue } from "./pagination.js";
 
 export type AuditOutcome = "succeeded" | "failed" | "denied" | "unknown";
 
@@ -227,21 +228,6 @@ export interface AuditLogPage {
 const MAX_PAGE_SIZE = 200;
 const DEFAULT_PAGE_SIZE = 50;
 
-function decodeCursor(cursor: string): { created_at: string; id: string } | null {
-  try {
-    const decoded = Buffer.from(cursor, "base64").toString("utf8");
-    const match = decoded.match(/^before:([^|]+)\|(.+)$/);
-    if (!match) return null;
-    return { created_at: match[1], id: match[2] };
-  } catch {
-    return null;
-  }
-}
-
-function encodeCursor(row: AuditLogRow): string {
-  return Buffer.from(`before:${row.created_at}|${row.id}`, "utf8").toString("base64");
-}
-
 /**
  * Filtered, cursor-paginated read over access_logs scoped to a single user.
  * Ordering is (created_at DESC, id DESC) so the cursor is stable across
@@ -267,11 +253,12 @@ export async function readAuditLogPage(
   if (query.clientId) q = q.eq("client_id", query.clientId);
 
   if (query.cursor) {
-    const decoded = decodeCursor(query.cursor);
+    const decoded = decodeBeforeCursor(query.cursor);
     if (decoded) {
-      // Strictly-before on (created_at, id): either older timestamp, or same
-      // timestamp and smaller id. Expressed as OR-of-AND.
-      q = q.or(`created_at.lt.${decoded.created_at},and(created_at.eq.${decoded.created_at},id.lt.${decoded.id})`);
+      // SV-AUD-014: cursor is HMAC-authenticated and field-validated before it
+      // ever reaches here; values are escaped as defense-in-depth. A malformed/
+      // tampered cursor decodes to null and is ignored (first page).
+      q = q.or(`created_at.lt.${escapePostgrestValue(decoded.before)},and(created_at.eq.${escapePostgrestValue(decoded.before)},id.lt.${escapePostgrestValue(decoded.tiebreaker)})`);
     }
   }
 
@@ -286,7 +273,7 @@ export async function readAuditLogPage(
   const rows = (data ?? []) as AuditLogRow[];
   const hasMore = rows.length > pageSize;
   const page = hasMore ? rows.slice(0, pageSize) : rows;
-  const next_cursor = hasMore && page.length > 0 ? encodeCursor(page[page.length - 1]) : null;
+  const next_cursor = hasMore && page.length > 0 ? encodeBeforeCursor(page[page.length - 1].created_at, page[page.length - 1].id) : null;
 
   return { events: page, next_cursor };
 }

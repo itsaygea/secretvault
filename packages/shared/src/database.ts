@@ -115,6 +115,7 @@ export interface Database {
           is_admin: boolean;
           api_key_hash: string | null;
           api_key_prefix: string | null;
+          session_epoch: number;
           created_at: string;
         };
         Insert: {
@@ -124,6 +125,7 @@ export interface Database {
           is_admin?: boolean;
           api_key_hash?: string | null;
           api_key_prefix?: string | null;
+          session_epoch?: number;
           created_at?: string;
         };
         Update: {
@@ -133,6 +135,7 @@ export interface Database {
           is_admin?: boolean;
           api_key_hash?: string | null;
           api_key_prefix?: string | null;
+          session_epoch?: number;
           created_at?: string;
         };
         Relationships: [];
@@ -379,6 +382,30 @@ export interface Database {
         };
         Relationships: [];
       };
+      rate_limit_buckets: {
+        Row: {
+          bucket_key: string;
+          window_start: number;
+          count: number;
+          cooldown_until: number;
+          updated_at: string;
+        };
+        Insert: {
+          bucket_key: string;
+          window_start: number;
+          count?: number;
+          cooldown_until?: number;
+          updated_at?: string;
+        };
+        Update: {
+          bucket_key?: string;
+          window_start?: number;
+          count?: number;
+          cooldown_until?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       system_settings: {
         Row: {
           key: string;
@@ -402,6 +429,18 @@ export interface Database {
       };
     };
     Views: {};
-    Functions: {};
+    Functions: {
+      rate_limit_charge: {
+        Args: { p_bucket_key: string; p_window_start: number };
+        Returns: {
+          current_count: number;
+          cooldown_until: number;
+        };
+      };
+      rate_limit_reap: {
+        Args: { p_before_window_start: number };
+        Returns: undefined;
+      };
+    };
   };
 }

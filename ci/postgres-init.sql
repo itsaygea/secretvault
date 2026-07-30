@@ -5,16 +5,19 @@
 -- not a mock that returns empty arrays (SV-029).
 --
 --   authenticator  - the LOGIN role PostgREST connects as; it can switch into
---                    service_role or anon per request via SET LOCAL ROLE.
---   service_role   - NOLOGIN; the trusted backend role the app uses. Migrations
---                    grant it SELECT/INSERT/UPDATE/DELETE on every table and
---                    USAGE on the secretvault schema.
+--                    sv_runtime, service_role, or anon per request via SET LOCAL ROLE.
+--   sv_runtime     - NOLOGIN/NOBYPASSRLS; the role authenticated app traffic
+--                    switches into. Tenant RLS policies (migration 022) bind to
+--                    the per-request tenant_user_id claim.
+--   service_role   - NOLOGIN; retained for global/pre-auth paths and admin user
+--                    management on non-tenant tables.
 --   anon           - NOLOGIN; the untrusted role. Must NOT be able to read or
 --                    write secretvault data.
 
+CREATE ROLE sv_runtime NOLOGIN NOBYPASSRLS;
 CREATE ROLE service_role NOLOGIN;
 CREATE ROLE anon NOLOGIN;
-CREATE ROLE authenticator LOGIN PASSWORD 'ci-authenticator' IN ROLE service_role, anon;
+CREATE ROLE authenticator LOGIN PASSWORD 'ci-authenticator' IN ROLE sv_runtime, service_role, anon;
 
 -- PostgREST resolves request.jwt.claim.role through this function (the same
 -- convention the 001 RLS policies rely on via auth.role()).

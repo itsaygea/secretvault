@@ -5,7 +5,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { safeResponse } from "../safeResponse.js";
 import { hasScope, type Principal } from "../authz.js";
 import { recordAuditEvent } from "../audit.js";
-import { clampPageSize, decodeCursor, encodeCursor, paginateQuery, type PageResult } from "../pagination.js";
+import { clampPageSize, decodeCursor, encodeCursor, paginateQuery, escapePostgrestValue, type PageResult } from "../pagination.js";
+import { safeErrorMessage } from "../dbErrors.js";
 
 const inputSchema = {
   environment: z
@@ -56,7 +57,7 @@ export function registerListSecrets(server: McpServer, supabase: SupabaseClient<
     if (cursor) {
       const decoded = decodeCursor(cursor);
       if (decoded) {
-        query = query.or(`name.gt.${decoded.after},and(name.eq.${decoded.after},id.gt.${decoded.tiebreaker})`);
+        query = query.or(`name.gt.${escapePostgrestValue(decoded.after)},and(name.eq.${escapePostgrestValue(decoded.after)},id.gt.${escapePostgrestValue(decoded.tiebreaker)})`);
       }
     }
 
@@ -65,7 +66,7 @@ export function registerListSecrets(server: McpServer, supabase: SupabaseClient<
     const { data: secrets, error } = await query.limit(pageSize + 1);
 
     if (error) {
-      return { content: [{ type: "text" as const, text: safeResponse({ error: error.message }) }] };
+      return { content: [{ type: "text" as const, text: safeResponse({ error: safeErrorMessage(error) }) }] };
     }
 
     const page = await paginateQuery<{ id: string; name: string; display_name: string | null; environment: string; masked_preview: string; tags: string[] }>(

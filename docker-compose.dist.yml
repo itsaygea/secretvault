@@ -13,13 +13,14 @@
 #   SECRETVAULT_DIGEST=sha256:... \
 #   docker compose -f docker-compose.yml -f docker-compose.dist.yml config
 #
-# (SECRETVAULT_IMAGE must be set; SECRETVAULT_DIGEST is optional but strongly
-# recommended — a digest pins the exact bytes and is immune to tag retagging.)
+# (SV-AUD-012: both SECRETVAULT_IMAGE and SECRETVAULT_DIGEST are required. The
+# digest pins the exact immutable bytes and is immune to tag retagging; a
+# tag-only pull is intentionally refused by this distribution compose.)
 services:
   secretvault-mcp:
     # Remove the source build: pull a published image instead. The base
     # docker-compose.yml sets build+image; Compose merges keys, so we override
     # build to null and image to the registry ref.
     build: !reset null
-    image: "${SECRETVAULT_IMAGE:?SECRETVAULT_IMAGE must be set to a published SecretVault image, e.g. ghcr.io/itsaygea/secretvault:v1.0.0}${SECRETVAULT_DIGEST:+@${SECRETVAULT_DIGEST}}"
+    image: "${SECRETVAULT_IMAGE:?SECRETVAULT_IMAGE must be set to a published SecretVault image, e.g. ghcr.io/itsaygea/secretvault:v1.0.0}@${SECRETVAULT_DIGEST:?SECRETVAULT_DIGEST must be set to the image's sha256 digest (e.g. sha256:…). A tag-only pull is refused.}"
     pull_policy: "${SECRETVAULT_PULL_POLICY:-missing}"

@@ -1,6 +1,13 @@
+# SV-AUD-001: this overlay puts Caddy (TLS) in front of SecretVault. When it is
+# active, Caddy is the ONLY externally reachable path. We null out the app's
+# host-side port 3004 publish so plaintext can never be reached directly even if
+# SECRETVAULT_PUBLISH_HOST was left non-loopback — the app stays reachable only
+# on the Compose network as `secretvault-mcp:3004` (used by the Caddyfile).
 services:
+  secretvault-mcp:
+    ports: !reset null
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     restart: always
     ports:
       - "80:80"

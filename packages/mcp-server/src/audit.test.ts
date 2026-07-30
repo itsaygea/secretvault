@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   finishAuditEvent,
   sanitizeAuditCaller,
@@ -8,6 +8,12 @@ import {
   setAuditAlertSink,
   type AuditAlertFn,
 } from "./audit.js";
+import { encodeBeforeCursor, initCursorKey } from "./pagination.js";
+
+// SV-AUD-014: cursor HMAC key derived from master key at boot.
+beforeAll(() => {
+  initCursorKey(Buffer.alloc(32, 7));
+});
 
 describe("audit event sanitization", () => {
   it("redacts credential-like query parameters", () => {
@@ -277,14 +283,25 @@ describe("audit log cursor pagination", () => {
   });
 
   it("emits a strictly-before OR predicate from the cursor", async () => {
-    const rows = [{ id: "5", created_at: "2026-07-26T00:00:00Z", user_id: "u1", secret_name: "system", access_type: "login", caller: "c", outcome: "succeeded", request_id: null, client_id: null, actor_username: null, metadata: {} }];
-    // Build a cursor from a known row, then decode it into an .or() clause.
-    const cursor = Buffer.from(`before:2026-07-26T00:00:05Z|5`, "utf8").toString("base64");
+    const UUID5 = "00000000-0000-4000-8000-000000000005";
+    const rows = [{ id: UUID5, created_at: "2026-07-26T00:00:00Z", user_id: "u1", secret_name: "system", access_type: "login", caller: "c", outcome: "succeeded", request_id: null, client_id: null, actor_username: null, metadata: {} }];
+    // SV-AUD-014: cursor is HMAC-signed; build it via the shared encoder.
+    const cursor = encodeBeforeCursor("2026-07-26T00:00:05Z", UUID5);
     const { builder, captured } = mockReadBuilder(rows);
     const supabase = { from: vi.fn(() => builder) } as any;
 
     await readAuditLogPage(supabase, "u1", { cursor });
-    expect(captured.or).toContain("created_at.lt.2026-07-26T00:00:05Z");
-    expect(captured.or).toContain("id.lt.5");
+    // Validated values are PostgREST-escaped (quoted).
+    expect(captured.or).toContain('created_at.lt."2026-07-26T00:00:05Z"');
+    expect(captured.or).toContain(`id.lt."${UUID5}"`);
+  });
+
+  // SV-AUD-014: a tampered/unsigned cursor never reaches .or().
+  it("ignores an unsigned cursor instead of building a predicate", async () => {
+    const { builder, captured } = mockReadBuilder([]);
+    const supabase = { from: vi.fn(() => builder) } as any;
+    const oldUnsigned = Buffer.from(`before:2026-07-26T00:00:05Z|5`, "utf8").toString("base64");
+    await readAuditLogPage(supabase, "u1", { cursor: oldUnsigned });
+    expect(captured.or).toBeUndefined();
   });
 });

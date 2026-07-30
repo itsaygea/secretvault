@@ -23,10 +23,10 @@ describe("startup migration helpers", () => {
   it("loads the checked-in migration set in startup order", async () => {
     const migrations = await loadMigrations(resolve(process.cwd(), "supabase/migrations"));
     expect(migrations[0]?.filename).toBe("001_create_tables.sql");
-    expect(migrations.at(-1)?.filename).toBe("019_canonical_service_names.sql");
+    expect(migrations.at(-1)?.filename).toBe("022_tenant_isolation.sql");
     // Guard against silent drift if a migration is added without updating
     // this test: assert the exact current count.
-    expect(migrations).toHaveLength(19);
+    expect(migrations).toHaveLength(22);
   });
 });
 

@@ -11,14 +11,6 @@ export interface Secret {
   tags: string[];
 }
 
-export interface SecretReference {
-  name: string;
-  reference: string;
-  masked: string;
-  environment: string;
-  tags: string[];
-}
-
 export interface AccessLog {
   id: string;
   secret_id: string | null;

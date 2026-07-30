@@ -1,5 +1,6 @@
 import dns from "node:dns/promises";
 import net from "node:net";
+import ipaddr from "ipaddr.js";
 
 export const SERVICE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,63}$/;
 export const ALLOWED_PROXY_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
@@ -162,14 +163,73 @@ export function sanitizeRequestHeaders(
   return out;
 }
 
+// ── SV-AUD-003: value-based response redaction ─────────────────────
+/**
+ * Every rendering of an injected credential, for the life of one request.
+ * Response redaction is value-based, not name-based: the upstream is not
+ * trusted to keep credentials out of arbitrary header names or error bodies,
+ * so we track each form the secret can take and drop anything that contains it.
+ *
+ * `lengthLowerBound` avoids a substring scan against trivially short fragments
+ * that could false-positive on unrelated content; only renderings at least that
+ * long are registered as scannable values.
+ */
+const MIN_SENSITIVE_SCAN_LENGTH = 6;
+
+export interface SensitiveValueSet {
+  /** Every scannable rendering (lowercased for case-insensitive substring match). */
+  readonly values: ReadonlySet<string>;
+  /** Track an additional raw value and derive its common renderings. */
+  add: (raw: string) => void;
+}
+
+/**
+ * Build a per-request sensitive-value tracker. The set is deliberately empty
+ * until the caller registers the injected raw credentials — no shared state,
+ * bounded to one request.
+ */
+export function createSensitiveValueSet(initial: Iterable<string> = []): SensitiveValueSet {
+  const values = new Set<string>();
+  const add = (raw: string): void => {
+    const trimmed = raw?.trim();
+    if (!trimmed || trimmed.length < MIN_SENSITIVE_SCAN_LENGTH) return;
+    // Raw value (and case-folded) — covers bearer/header/cookie direct echoes.
+    values.add(trimmed);
+    values.add(trimmed.toLowerCase());
+    // base64 rendering — covers Basic auth base64 echoed verbatim or in JSON.
+    try {
+      const b64 = Buffer.from(trimmed, "utf8").toString("base64");
+      if (b64 && b64.length >= MIN_SENSITIVE_SCAN_LENGTH) values.add(b64);
+    } catch { /* ignore encoding failures */ }
+  };
+  for (const v of initial) add(v);
+  return { values, add };
+}
+
+/** True if the candidate text contains any tracked sensitive rendering. */
+export function containsSensitiveValue(text: string, set: SensitiveValueSet | undefined): boolean {
+  if (!set || text.length < MIN_SENSITIVE_SCAN_LENGTH) return false;
+  const lowered = text.toLowerCase();
+  for (const value of set.values) {
+    if (value.length >= MIN_SENSITIVE_SCAN_LENGTH && lowered.includes(value)) return true;
+  }
+  return false;
+}
+
+export interface ResponseSanitizeOptions extends HeaderSanitizeOptions {
+  /** Tracked injected-credential renderings; any response header containing one is dropped. */
+  sensitiveValues?: SensitiveValueSet;
+}
+
 /**
  * Copy upstream response headers back to the client, dropping the complete
- * hop-by-hop set, every Connection-nominated field, and credential-bearing
- * headers the upstream must not be allowed to set on the caller.
+ * hop-by-hop set, every Connection-nominated field, credential-bearing headers
+ * the upstream must not be allowed to set on the caller, AND (SV-AUD-003) any
+ * header whose value contains a tracked injected credential regardless of name.
  */
 export function sanitizeResponseHeaders(
   upstreamHeaders: Record<string, string | string[] | undefined>,
-  options: HeaderSanitizeOptions = {},
+  options: ResponseSanitizeOptions = {},
 ): Record<string, string> {
   const connection = pickHeader(upstreamHeaders, "connection");
   const nominated = connectionNominatedFields(connection);
@@ -180,7 +240,10 @@ export function sanitizeResponseHeaders(
     if (shouldRemoveForwardingHeader(lower, nominated, { stripForwarding: options.stripForwarding ?? false })) continue;
     // Credentials/identity the proxy owns.
     if (lower === "set-cookie" || lower === "www-authenticate" || lower === "authorization" || lower === "cookie" || lower === "x-request-id") continue;
-    out[key] = Array.isArray(rawValue) ? rawValue.join(", ") : rawValue;
+    const rendered = Array.isArray(rawValue) ? rawValue.join(", ") : rawValue;
+    // SV-AUD-003: value-based redaction — drop any header echoing an injected credential.
+    if (containsSensitiveValue(rendered, options.sensitiveValues)) continue;
+    out[key] = rendered;
   }
   return out;
 }
@@ -211,23 +274,71 @@ function normalizeHost(hostname: string): string {
   return hostname.replace(/^\[/, "").replace(/\]$/, "").toLowerCase();
 }
 
-function isBlockedIp(address: string): boolean {
-  const host = normalizeHost(address);
-  const version = net.isIP(host);
-  if (version === 4) {
-    const parts = host.split(".").map(Number);
-    const [a, b] = parts;
-    return a === 0 || a === 10 || a === 127 || a === 169 && b === 254 ||
-      a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 ||
-      a === 100 && b >= 64 && b <= 127 || a >= 224;
+// ── SV-AUD-004: byte/CIDR classification via ipaddr.js ──────────────
+// Replaces the hand-written octet checks. Every non-global-unicast range is
+// denied by default; classification runs on a canonicalized address so IPv4-
+// mapped IPv6 (including the hex-compressed form `::ffff:7f00:1`) cannot slip
+// a private destination past the IPv6 branch. ipaddr.js's range() does not
+// classify the benchmarking/docs bands, so those are listed explicitly as CIDR.
+const DENIED_IPV4_CIDRS: [ipaddr.IPv4, number][] = [
+  "0.0.0.0/8",          // "this network" / unspecified-source band
+  "10.0.0.0/8",         // RFC1918 private
+  "100.64.0.0/10",      // RFC6598 carrier-grade NAT
+  "127.0.0.0/8",        // loopback
+  "169.254.0.0/16",     // link-local (incl. cloud metadata 169.254.169.254)
+  "172.16.0.0/12",      // RFC1918 private
+  "192.0.0.0/24",       // IETF protocol assignments
+  "192.0.2.0/24",       // TEST-NET-1 documentation
+  "192.168.0.0/16",     // RFC1918 private
+  "198.18.0.0/15",      // RFC2544 benchmarking (not classified by ipaddr range())
+  "198.51.100.0/24",    // TEST-NET-2 documentation
+  "203.0.113.0/24",     // TEST-NET-3 documentation
+  "240.0.0.0/4",        // reserved / future use (class E)
+  "255.255.255.255/32", // limited broadcast
+].map(cidr => ipaddr.parseCIDR(cidr) as [ipaddr.IPv4, number]);
+
+const DENIED_IPV6_CIDRS: [ipaddr.IPv6, number][] = [
+  "::/128",             // unspecified
+  "::1/128",            // loopback
+  "fc00::/7",           // unique-local (ULA)
+  "fe80::/10",          // link-local
+  "ff00::/8",           // multicast
+  "::ffff:0:0/96",      // IPv4-mapped band — re-checked as IPv4 below after canonicalization
+  "64:ff9b::/96",       // NAT64 well-known prefix
+  "100::/64",           // discard-only prefix
+  "2001:db8::/32",      // documentation
+].map(cidr => ipaddr.parseCIDR(cidr) as [ipaddr.IPv6, number]);
+
+/**
+ * Classify a parsed address as non-global-unicast. IPv4-mapped IPv6 is
+ * canonicalized to its IPv4 form first, so the underlying private destination
+ * (loopback, RFC1918, etc.) is evaluated against the IPv4 denylist regardless
+ * of whether the caller supplied dotted, hex, expanded, or compressed notation.
+ */
+function isNonGlobalUnicast(addr: ipaddr.IPv4 | ipaddr.IPv6): boolean {
+  if (addr.kind() === "ipv4") {
+    const v4 = addr as ipaddr.IPv4;
+    return DENIED_IPV4_CIDRS.some(range => v4.match(range));
   }
-  if (version === 6) {
-    if (host.startsWith("::ffff:")) return isBlockedIp(host.slice("::ffff:".length));
-    return host === "::" || host === "::1" || host.startsWith("fe8") ||
-      host.startsWith("fe9") || host.startsWith("fea") || host.startsWith("feb") ||
-      host.startsWith("fc") || host.startsWith("fd") || host.startsWith("ff");
+  const v6 = addr as ipaddr.IPv6;
+  if (DENIED_IPV6_CIDRS.some(range => v6.match(range))) return true;
+  // IPv4-mapped IPv6 (range() === "ipv4Mapped"): convert and re-classify as
+  // IPv4 so ::ffff:7f00:1 / ::ffff:a00:1 are denied as loopback / RFC1918.
+  if (v6.range() === "ipv4Mapped") {
+    const asV4 = v6.toIPv4Address();
+    if (DENIED_IPV4_CIDRS.some(range => asV4.match(range))) return true;
   }
   return false;
+}
+
+function isBlockedIp(address: string): boolean {
+  const host = normalizeHost(address);
+  if (!net.isIP(host)) return false;
+  try {
+    return isNonGlobalUnicast(ipaddr.parse(host));
+  } catch {
+    return false;
+  }
 }
 
 function isBlockedHostname(hostname: string): boolean {

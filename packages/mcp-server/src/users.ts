@@ -2,11 +2,10 @@ import crypto from "node:crypto";
 import bcrypt from "bcryptjs";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@secretvault/shared";
-import { decryptSecret, encryptSecret } from "@secretvault/shared";
+import { decryptSecret, encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import { validateLinkingKeyScopes } from "./authz.js";
 import { recordAuditEvent } from "./audit.js";
 import { verifyStepUpToken, verifyStepUpTokenForResource, wipeUserTotpState } from "./stepup.js";
-import { sessionRevocation } from "./sessionRevocation.js";
 import { internalError } from "./dbErrors.js";
 import { validateUsername, validatePassword, validateBoundedString, LIMITS, validationErrorResponse, ValidationError } from "./validation.js";
 
@@ -167,10 +166,10 @@ export async function authenticateUser(
   supabase: SupabaseClient<Database, "secretvault">,
   username: string,
   password: string,
-): Promise<{ id: string; username: string; is_admin: boolean } | null> {
+): Promise<{ id: string; username: string; is_admin: boolean; session_epoch: number } | null> {
   const { data: user } = await supabase
     .from("users")
-    .select("id, username, is_admin, password_hash")
+    .select("id, username, is_admin, password_hash, session_epoch")
     .eq("username", username)
     .single();
 
@@ -178,7 +177,32 @@ export async function authenticateUser(
   const valid = await bcrypt.compare(password, user.password_hash);
   if (!valid) return null;
 
-  return { id: user.id, username: user.username, is_admin: user.is_admin };
+  return { id: user.id, username: user.username, is_admin: user.is_admin, session_epoch: user.session_epoch ?? 0 };
+}
+
+/**
+ * SV-AUD-002: invalidate every existing session for a user by advancing their
+ * session epoch. Session tokens fold the epoch into their HMAC signature and are
+ * rejected on validation when the embedded epoch no longer matches the DB value.
+ * Returns the new epoch, or null on failure. Idempotent in effect (any monotonic
+ * bump invalidates prior tokens); used after factor replacement/removal.
+ */
+export async function bumpSessionEpoch(
+  supabase: SupabaseClient<Database, "secretvault">,
+  userId: string,
+): Promise<number | null> {
+  const { data: user } = await supabase
+    .from("users")
+    .select("session_epoch")
+    .eq("id", userId)
+    .single();
+  const nextEpoch = (user?.session_epoch ?? 0) + 1;
+  const { error } = await supabase
+    .from("users")
+    .update({ session_epoch: nextEpoch })
+    .eq("id", userId);
+  if (error) return null;
+  return nextEpoch;
 }
 
 // ── Debounced last_used_at batch updater ──────────────────────────
@@ -207,12 +231,12 @@ function debouncedLastUsedUpdate(supabase: SupabaseClient<any, "secretvault">, c
 export async function authenticateLinkingKey(
   supabase: SupabaseClient<any, "secretvault">,
   key: string,
-): Promise<{ id: string; username: string; is_admin: boolean; clientId?: string; scopes?: string[] } | null> {
+): Promise<{ id: string; username: string; is_admin: boolean; clientId?: string; scopes?: string[]; keyVersion?: number; sessionEpoch?: number } | null> {
   const hash = hashLinkingKey(key);
 
   const { data: clientApp } = await supabase
     .from("client_applications")
-    .select("id, scopes, user_id, users(id, username, is_admin)")
+    .select("id, scopes, key_version, user_id, users(id, username, is_admin, session_epoch)")
     .eq("key_hash", hash)
     .maybeSingle();
 
@@ -220,18 +244,18 @@ export async function authenticateLinkingKey(
     debouncedLastUsedUpdate(supabase, clientApp.id);
 
     const u = clientApp.users as any;
-    return { id: u.id, username: u.username, is_admin: u.is_admin, clientId: clientApp.id, scopes: clientApp.scopes ?? [] };
+    return { id: u.id, username: u.username, is_admin: u.is_admin, clientId: clientApp.id, scopes: clientApp.scopes ?? [], keyVersion: clientApp.key_version ?? 1, sessionEpoch: u.session_epoch ?? 0 };
   }
 
   const { data: user } = await supabase
     .from("users")
-    .select("id, username, is_admin")
+    .select("id, username, is_admin, session_epoch")
     .eq("api_key_hash", hash)
     .single();
 
   // Legacy api_key_hash records predate client_applications. Treat them as
   // the least-privileged compatibility credential rather than as a session.
-  return user ? { ...user, clientId: undefined, scopes: ["proxy:*"] } : null;
+  return user ? { ...user, clientId: undefined, scopes: ["proxy:*"], keyVersion: 0, sessionEpoch: user.session_epoch ?? 0 } : null;
 }
 
 // ── System Settings ──────────────────────────────────────────────────
@@ -348,7 +372,7 @@ export async function handleListUsers(
   supabase: SupabaseClient<any, "secretvault">,
   query?: { cursor?: string | null; pageSize?: number },
 ): Promise<{ status: number; body: unknown }> {
-  const { clampPageSize, decodeCursor, encodeCursor, paginateQuery } = await import("./pagination.js");
+  const { clampPageSize, decodeCursor, encodeCursor, escapePostgrestValue, paginateQuery } = await import("./pagination.js");
   const pageSize = clampPageSize(query?.pageSize);
   let q = supabase
     .from("users")
@@ -356,9 +380,11 @@ export async function handleListUsers(
 
   if (query?.cursor) {
     const decoded = decodeCursor(query.cursor);
-    if (decoded) {
-      q = q.or(`created_at.gt.${decoded.after},and(created_at.eq.${decoded.after},id.gt.${decoded.tiebreaker})`);
+    if (!decoded) {
+      // SV-AUD-014: reject tampered/malformed cursors.
+      return { status: 400, body: { error: "Invalid cursor", code: "INVALID_CURSOR" } };
     }
+    q = q.or(`created_at.gt.${escapePostgrestValue(decoded.after)},and(created_at.eq.${escapePostgrestValue(decoded.after)},id.gt.${escapePostgrestValue(decoded.tiebreaker)})`);
   }
 
   q = q.order("created_at").order("id");
@@ -490,7 +516,7 @@ export async function handleAdminResetUserPassword(
   const { error } = await supabase.from("users").update({ password_hash: hash }).eq("id", targetUserId);
   if (error) return internalErrorResponse();
 
-  sessionRevocation.revokeAllUserSessions(targetUserId);
+  await bumpSessionEpoch(supabase, targetUserId);
 
   // Actor is the acting admin; target user is recorded in metadata so the
   // user_id column reflects who performed the reset, not who was reset.
@@ -517,7 +543,7 @@ export async function handleAdminResetUser2FA(
   await supabase.from("webauthn_credentials").delete().eq("user_id", targetUserId);
   await wipeUserTotpState(supabase, targetUserId);
 
-  sessionRevocation.revokeAllUserSessions(targetUserId);
+  await bumpSessionEpoch(supabase, targetUserId);
 
   await recordAuditEvent(supabase, {
     userId: actor?.userId ?? null,
@@ -604,7 +630,7 @@ export async function handleChangePassword(
   const { error } = await supabase.from("users").update({ password_hash: hash }).eq("id", userId);
   if (error) return internalErrorResponse();
 
-  sessionRevocation.revokeAllUserSessions(userId);
+  await bumpSessionEpoch(supabase, userId);
   void recordAuditEvent(supabase, {
     userId,
     secretName: "account",
@@ -676,7 +702,7 @@ export async function handleListClients(
   userId: string,
   query?: { cursor?: string | null; pageSize?: number },
 ): Promise<{ status: number; body: unknown }> {
-  const { clampPageSize, decodeBeforeCursor, encodeBeforeCursor, paginateQuery } = await import("./pagination.js");
+  const { clampPageSize, decodeBeforeCursor, encodeBeforeCursor, escapePostgrestValue, paginateQuery } = await import("./pagination.js");
   const pageSize = clampPageSize(query?.pageSize);
   let q = supabase
     .from("client_applications")
@@ -685,9 +711,11 @@ export async function handleListClients(
 
   if (query?.cursor) {
     const decoded = decodeBeforeCursor(query.cursor);
-    if (decoded) {
-      q = q.or(`created_at.lt.${decoded.before},and(created_at.eq.${decoded.before},id.lt.${decoded.tiebreaker})`);
+    if (!decoded) {
+      // SV-AUD-014: reject tampered/malformed cursors.
+      return { status: 400, body: { error: "Invalid cursor", code: "INVALID_CURSOR" } };
     }
+    q = q.or(`created_at.lt.${escapePostgrestValue(decoded.before)},and(created_at.eq.${escapePostgrestValue(decoded.before)},id.lt.${escapePostgrestValue(decoded.tiebreaker)})`);
   }
 
   q = q.order("created_at", { ascending: false }).order("id", { ascending: false });
@@ -721,11 +749,17 @@ export async function handleCreateClient(
   }
 
   const { key, hash, prefix } = generateLinkingKey();
-  const { encrypted } = await encryptSecret(key, masterKey);
+  // SV-AUD-005: bind client-key ciphertext to (userId, clientId).
+  const newClientId = crypto.randomUUID();
+  const { encrypted } = await encryptSecret(key, masterKey, {
+    purpose: ENCRYPTION_PURPOSE.CLIENT_KEY,
+    aad: buildContextAad(ENCRYPTION_PURPOSE.CLIENT_KEY, { userId, recordId: newClientId, clientId: newClientId }),
+  });
 
   const { data, error } = await supabase
     .from("client_applications")
     .insert({
+      id: newClientId,
       user_id: userId,
       app_name: normalizedAppName,
       key_hash: hash,
@@ -813,7 +847,10 @@ export async function handleRevealClientKey(
   if (!auditId) return { status: 503, body: { error: "Audit logging unavailable; operation blocked", code: "AUDIT_UNAVAILABLE" } };
 
   try {
-    const linking_key = await decryptSecret(client.encrypted_key, masterKey);
+    const linking_key = await decryptSecret(client.encrypted_key, masterKey, {
+      purpose: ENCRYPTION_PURPOSE.CLIENT_KEY,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.CLIENT_KEY, { userId, recordId: clientId, clientId }),
+    });
     if (!(await finishAuditEvent(supabase, auditId, "succeeded"))) {
       return { status: 503, body: { error: "Audit logging unavailable; reveal blocked", code: "AUDIT_UNAVAILABLE" } };
     }
@@ -849,7 +886,10 @@ export async function handleRegenerateClientKey(
   if (!existing) return { status: 404, body: { error: "Client application not found" } };
 
   const { key, hash, prefix } = generateLinkingKey();
-  const { encrypted } = await encryptSecret(key, masterKey);
+  const { encrypted } = await encryptSecret(key, masterKey, {
+    purpose: ENCRYPTION_PURPOSE.CLIENT_KEY,
+    aad: buildContextAad(ENCRYPTION_PURPOSE.CLIENT_KEY, { userId, recordId: clientId, clientId }),
+  });
 
   const { startCriticalAuditEvent, finishAuditEvent } = await import("./audit.js");
   const auditId = await startCriticalAuditEvent(supabase, {
@@ -1027,7 +1067,7 @@ export async function handleResetAdminPasswordCLI(
   // the current process image; in a multi-replica deployment, restart each
   // replica or rely on the shared revocation store.
   try {
-    sessionRevocation.revokeAllUserSessions(user.id);
+    await bumpSessionEpoch(supabase, user.id);
   } catch {
     // Session revocation is best-effort during break-glass; the password reset
     // and audit record are the authoritative recovery actions.

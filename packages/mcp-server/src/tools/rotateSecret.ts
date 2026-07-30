@@ -6,6 +6,7 @@ import { encryptSecret, maskSecret, generatePrefixSuffix, canonicalName } from "
 import { safeResponse } from "../safeResponse.js";
 import { hasScope, type Principal } from "../authz.js";
 import { finishAuditEvent, recordAuditEvent, startCriticalAuditEvent } from "../audit.js";
+import { safeErrorMessage } from "../dbErrors.js";
 
 const inputSchema = {
   name: z.string().describe("Name of the secret to rotate"),
@@ -74,7 +75,7 @@ export function registerRotateSecret(server: McpServer, supabase: SupabaseClient
 
       if (updateError) {
         await finishAuditEvent(supabase, auditId, "failed", { reason: "secret_update_failed" });
-        return { content: [{ type: "text" as const, text: safeResponse({ error: updateError.message }) }] };
+        return { content: [{ type: "text" as const, text: safeResponse({ error: safeErrorMessage(updateError) }) }] };
       }
 
       await finishAuditEvent(supabase, auditId, "succeeded");

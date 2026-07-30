@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildProxyTargetUrl, isProxyPathAllowed, isTargetOriginAllowed, isValidServiceName, isValidHeaderName, isValidCookieName, parseEgressAllowlist, safeDecodePathSegment, sanitizeRequestHeaders, sanitizeResponseHeaders, validateResolvedTarget, validateTargetUrl, validateProxyPathPrefixes } from "./proxyPolicy.js";
+import { buildProxyTargetUrl, isProxyPathAllowed, isTargetOriginAllowed, isValidServiceName, isValidHeaderName, isValidCookieName, parseEgressAllowlist, safeDecodePathSegment, sanitizeRequestHeaders, sanitizeResponseHeaders, validateResolvedTarget, validateTargetUrl, validateProxyPathPrefixes, createSensitiveValueSet, containsSensitiveValue } from "./proxyPolicy.js";
 
 describe("proxy path policy", () => {
   it("keeps ordinary request paths on the configured origin", () => {
@@ -54,6 +54,32 @@ describe("proxy path policy", () => {
 
   it("returns a pinned address for an IP-literal destination", async () => {
     await expect(validateResolvedTarget(new URL("https://8.8.8.8/"))).resolves.toEqual({ address: "8.8.8.8", family: 4 });
+  });
+
+  // SV-AUD-004: IPv4-mapped IPv6 and benchmarking/docs ranges must be denied.
+  it.each([
+    ["::ffff:7f00:1", "hex-form mapped loopback"],
+    ["::ffff:127.0.0.1", "dotted-form mapped loopback"],
+    ["::ffff:a00:1", "hex-form mapped RFC1918"],
+    ["::ffff:10.0.0.1", "dotted-form mapped RFC1918"],
+    ["::1", "IPv6 loopback"],
+    ["fc00::1", "unique-local"],
+    ["fe80::1", "link-local v6"],
+    ["ff02::1", "multicast"],
+    ["198.18.0.1", "benchmarking band"],
+    ["198.19.255.1", "benchmarking band upper"],
+    ["192.0.2.1", "TEST-NET-1 docs"],
+    ["100.64.0.1", "carrier-grade NAT"],
+  ])("denies non-global-unicast destination %s (%s)", (addr) => {
+    expect(() => validateTargetUrl(`https://[${addr}]/`)).toThrow();
+  });
+
+  it.each([
+    ["https://8.8.8.8/", "public IPv4"],
+    ["https://1.1.1.1/", "public IPv4"],
+    ["https://[2606:4700::1]/", "public IPv6"],
+  ])("allows public destination %s (%s)", (url) => {
+    expect(() => validateTargetUrl(url)).not.toThrow();
   });
 });
 
@@ -221,3 +247,51 @@ describe("safe percent-decoding (SV-024)", () => {
     }
   });
 });
+
+describe("value-based response redaction (SV-AUD-003)", () => {
+  it("drops a response header that echoes an injected bearer credential under any name", () => {
+    const sensitive = createSensitiveValueSet(["vault-secret-123456"]);
+    const out = sanitizeResponseHeaders(
+      { "x-debug-auth": "Bearer vault-secret-123456", "x-trace": "ok" },
+      { sensitiveValues: sensitive },
+    );
+    expect(out["x-debug-auth"]).toBeUndefined();
+    expect(out["x-trace"]).toBe("ok");
+  });
+
+  it("drops a header echoing the Basic composite and its base64 rendering", () => {
+    const raw = "vault-secret-123456";
+    const encoded = Buffer.from(`user:${raw}`).toString("base64");
+    const sensitive = createSensitiveValueSet([raw, `user:${raw}`, `Basic ${encoded}`]);
+    sensitive.add(encoded);
+    const out = sanitizeResponseHeaders(
+      { "x-echo": encoded, "server": "nginx" },
+      { sensitiveValues: sensitive },
+    );
+    expect(out["x-echo"]).toBeUndefined();
+    expect(out["server"]).toBe("nginx");
+  });
+
+  it("drops a header echoing a cookie rendering", () => {
+    const sensitive = createSensitiveValueSet(["vault-secret-123456"]);
+    sensitive.add("session=vault-secret-123456");
+    const out = sanitizeResponseHeaders(
+      { "x-set-debug": "session=vault-secret-123456" },
+      { sensitiveValues: sensitive },
+    );
+    expect(out["x-set-debug"]).toBeUndefined();
+  });
+
+  it("does not register trivially short values (false-positive guard)", () => {
+    const sensitive = createSensitiveValueSet(["abc"]);
+    expect(containsSensitiveValue("abc", sensitive)).toBe(false);
+    expect(sensitive.values.size).toBe(0);
+  });
+
+  it("still drops named credential headers even without a sensitive set", () => {
+    const out = sanitizeResponseHeaders({ "set-cookie": "leak", "www-authenticate": "Basic" });
+    expect(out["set-cookie"]).toBeUndefined();
+    expect(out["www-authenticate"]).toBeUndefined();
+  });
+});
+

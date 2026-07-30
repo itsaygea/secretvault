@@ -48,10 +48,11 @@ describe("Browser Contracts & User Settings Endpoints", () => {
         select: () => ({
           eq: () => ({
             maybeSingle: async () => ({ data: { id: "user-bob", username: "bob" } }),
+            single: async () => ({ data: { id: "user-bob", session_epoch: 0 }, error: null }),
           }),
         }),
         update: (data: any) => {
-          updatedHash = data.password_hash;
+          if (data.password_hash) updatedHash = data.password_hash;
           return { eq: () => ({ error: null }) };
         },
       }),

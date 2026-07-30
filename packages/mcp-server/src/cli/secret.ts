@@ -60,19 +60,32 @@ export async function handleSecretCli(): Promise<void> {
   const subcommand = args[0] || "list";
 
   const urlIdx = args.indexOf("--url");
-  let keyIdx = args.indexOf("--client-key");
-  if (keyIdx === -1) keyIdx = args.indexOf("--client_key");
-  if (keyIdx === -1) keyIdx = args.indexOf("--key");
+  const keyIdx = args.indexOf("--client-key") !== -1
+    ? args.indexOf("--client-key")
+    : args.indexOf("--client_key") !== -1
+      ? args.indexOf("--client_key")
+      : args.indexOf("--key");
 
   const nameIdx = args.indexOf("--name");
   const valIdx = args.indexOf("--value");
+  const allowSecretFlags = args.includes("--allow-secret-flags");
+
+  // SV-AUD-007: client keys are secret material and must not appear in argv
+  // (visible via /proc/<pid>/cmdline, ps, shell history). The --client-key /
+  // --key flags are deprecated and refused unless --allow-secret-flags is set.
+  if (keyIdx !== -1 && !allowSecretFlags) {
+    console.error("\x1b[1;33mSecurity: --client-key/--key are deprecated and refused by default.\x1b[0m");
+    console.error("Passing a client key on the command line exposes it in process listings and shell history.");
+    console.error("Set the SECRETVAULT_CLIENT_KEY environment variable, or re-run with --allow-secret-flags to acknowledge the risk.");
+    process.exit(1);
+  }
 
   const serverUrl = (urlIdx !== -1 && args[urlIdx + 1]) || process.env.SECRETVAULT_URL || "http://localhost:3004";
   const clientKey = (keyIdx !== -1 && args[keyIdx + 1]) || process.env.SECRETVAULT_CLIENT_KEY || process.env.SECRETVAULT_TOKEN || "";
 
   if (!clientKey && subcommand !== "help") {
     console.error("\x1b[1;31mError: Missing SecretVault Client Key or Token.\x1b[0m");
-    console.error("Set SECRETVAULT_CLIENT_KEY environment variable or pass --client-key <sv_...>");
+    console.error("Set the SECRETVAULT_CLIENT_KEY environment variable (preferred).");
     process.exit(1);
   }
 
@@ -118,8 +131,17 @@ export async function handleSecretCli(): Promise<void> {
 
     case "create":
     case "add": {
+      // SV-AUD-007: a secret value must not be passed on the command line.
+      // --value is deprecated and refused unless --allow-secret-flags is set;
+      // otherwise the value is read interactively (hidden) or via stdin.
+      if (valIdx !== -1 && !allowSecretFlags) {
+        console.error("\x1b[1;33mSecurity: --value is deprecated and refused by default.\x1b[0m");
+        console.error("Passing a secret value on the command line exposes it in process listings and shell history.");
+        console.error("Provide it via the interactive prompt, or re-run with --allow-secret-flags to acknowledge the risk.");
+        process.exit(1);
+      }
       let name = (nameIdx !== -1 && args[nameIdx + 1]) || "";
-      let value = (valIdx !== -1 && args[valIdx + 1]) || "";
+      let value = (valIdx !== -1 && allowSecretFlags && args[valIdx + 1]) || "";
       let displayName = name;
       let environment = "development";
       let tags: string[] = [];

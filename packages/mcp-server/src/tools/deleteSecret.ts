@@ -6,6 +6,7 @@ import { canonicalName } from "@secretvault/shared";
 import { safeResponse } from "../safeResponse.js";
 import { hasScope, type Principal } from "../authz.js";
 import { finishAuditEvent, recordAuditEvent, startCriticalAuditEvent } from "../audit.js";
+import { safeErrorMessage } from "../dbErrors.js";
 
 const inputSchema = {
   name: z.string().describe("Name of the secret to delete"),
@@ -62,7 +63,7 @@ export function registerDeleteSecret(server: McpServer, supabase: SupabaseClient
 
     if (error) {
       await finishAuditEvent(supabase, auditId, "failed", { reason: "secret_delete_failed" });
-      return { content: [{ type: "text" as const, text: safeResponse({ error: error.message }) }] };
+      return { content: [{ type: "text" as const, text: safeResponse({ error: safeErrorMessage(error) }) }] };
     }
 
     await finishAuditEvent(supabase, auditId, "succeeded");

@@ -246,6 +246,8 @@ describe.skipIf(!hasDockerCompose)("#95 bundled installer — docker compose con
     POSTGRES_USER: "secretvault",
     POSTGRES_PASSWORD: "dryrun",
     PGRST_JWT_SECRET: "dry-run-jwt-secret",
+    SECRETVAULT_PGRST_JWT_SECRET: "dry-run-jwt-secret",
+    SV_AUTHENTICATOR_PASSWORD: "dry-run-authenticator",
   };
 
   let rendered = "";
@@ -281,6 +283,11 @@ describe.skipIf(!hasDockerCompose)("#95 bundled installer — docker compose con
 
   it("wires the app at the bundled postgrest-proxy URL", () => {
     expect(rendered).toMatch(/SECRETVAULT_SUPABASE_URL:\s*http:\/\/postgrest-proxy:8000/);
-    expect(rendered).toMatch(/SECRETVAULT_DATABASE_SSL:\s*"?false"?/);
+    // SV-AUD-013: the runtime app carries the raw JWT secret to mint per-request
+    // tenant tokens, and the network split (frontend vs backend) is declared so
+    // only PostgREST + migrate can reach postgres.
+    expect(rendered).toMatch(/SECRETVAULT_PGRST_JWT_SECRET:/);
+    expect(rendered).toMatch(/name:\s*secretvault_backend/);
+    expect(rendered).toMatch(/name:\s*secretvault_frontend/);
   });
 });

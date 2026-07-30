@@ -5,7 +5,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { safeResponse } from "../safeResponse.js";
 import { hasScope, type Principal } from "../authz.js";
 import { recordAuditEvent } from "../audit.js";
-import { clampPageSize, decodeCursor, encodeCursor, paginateQuery } from "../pagination.js";
+import { clampPageSize, decodeCursor, encodeCursor, paginateQuery, escapePostgrestValue } from "../pagination.js";
+import { safeErrorMessage } from "../dbErrors.js";
 
 const inputSchema = {
   query: z.string().optional().describe("Search pattern for secret name (case-insensitive)"),
@@ -58,7 +59,7 @@ export function registerSearchSecrets(server: McpServer, supabase: SupabaseClien
     if (cursor) {
       const decoded = decodeCursor(cursor);
       if (decoded) {
-        qb = qb.or(`name.gt.${decoded.after},and(name.eq.${decoded.after},id.gt.${decoded.tiebreaker})`);
+        qb = qb.or(`name.gt.${escapePostgrestValue(decoded.after)},and(name.eq.${escapePostgrestValue(decoded.after)},id.gt.${escapePostgrestValue(decoded.tiebreaker)})`);
       }
     }
 
@@ -67,7 +68,7 @@ export function registerSearchSecrets(server: McpServer, supabase: SupabaseClien
     const { data: secrets, error } = await qb.limit(pageSize + 1);
 
     if (error) {
-      return { content: [{ type: "text" as const, text: safeResponse({ error: error.message }) }] };
+      return { content: [{ type: "text" as const, text: safeResponse({ error: safeErrorMessage(error) }) }] };
     }
 
     const page = await paginateQuery<{ id: string; name: string; display_name: string | null; environment: string; masked_preview: string; tags: string[] }>(

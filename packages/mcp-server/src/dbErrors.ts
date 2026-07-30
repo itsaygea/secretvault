@@ -35,6 +35,17 @@ export function internalError(): PublicError {
 }
 
 /**
+ * The safe public message for an otherwise-unhandled DB/internal failure —
+ * for MCP tool handlers, which cannot set HTTP status. Returns the classified
+ * {@link PublicError.message} (a generic string), never the raw DB text. The
+ * raw diagnostic is already logged by the request envelope for operators; this
+ * only keeps the message itself out of the tool response. (SV-AUD-014 / SV-047)
+ */
+export function safeErrorMessage(error: unknown): string {
+  return classify(error).message;
+}
+
+/**
  * Classify a Supabase/PostgREST error into a stable PublicError. Used directly
  * when a handler wants to surface a precise code (conflict, validation) for a
  * known failure class; otherwise {@link internalError} is the safe default.

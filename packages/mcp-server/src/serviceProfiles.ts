@@ -1,8 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { canonicalName, encryptSecret, generatePrefixSuffix, maskSecret, validateSecretName } from "@secretvault/shared";
+import { canonicalName, validateSecretName } from "@secretvault/shared";
 import type { Database } from "@secretvault/shared";
 import { canonicalServiceName, isTargetOriginAllowed, isValidServiceName, normalizeProxyMethods, parseEgressAllowlist, validateProxyPathPrefixes, validateTargetUrl, validateInjectedName } from "./proxyPolicy.js";
-import { recordAuditEvent } from "./audit.js";
+import { recordAuditEvent, startCriticalAuditEvent, finishAuditEvent } from "./audit.js";
+import { createSecretValidated } from "./api.js";
+import { validateBoundedString, validateEnvironment, validateTags, LIMITS, validationErrorResponse, ValidationError } from "./validation.js";
 
 const VALID_METHODS = ["basic", "bearer", "header", "cookie"];
 
@@ -11,7 +13,7 @@ export async function handleListProfiles(
   userId: string,
   query?: { cursor?: string | null; pageSize?: number },
 ): Promise<{ status: number; body: unknown }> {
-  const { clampPageSize, decodeCursor, encodeCursor, paginateQuery } = await import("./pagination.js");
+  const { clampPageSize, decodeCursor, encodeCursor, escapePostgrestValue, paginateQuery } = await import("./pagination.js");
   const pageSize = clampPageSize(query?.pageSize);
   let q = supabase
     .from("service_profiles")
@@ -20,9 +22,11 @@ export async function handleListProfiles(
 
   if (query?.cursor) {
     const decoded = decodeCursor(query.cursor);
-    if (decoded) {
-      q = q.or(`name.gt.${decoded.after},and(name.eq.${decoded.after},id.gt.${decoded.tiebreaker})`);
+    if (!decoded) {
+      // SV-AUD-014: reject tampered/malformed cursors.
+      return { status: 400, body: { error: "Invalid cursor", code: "INVALID_CURSOR" } };
     }
+    q = q.or(`name.gt.${escapePostgrestValue(decoded.after)},and(name.eq.${escapePostgrestValue(decoded.after)},id.gt.${escapePostgrestValue(decoded.tiebreaker)})`);
   }
 
   q = q.order("name").order("id");
@@ -58,6 +62,8 @@ export async function handleCreateProfile(
   },
   isAdmin = false,
   masterKey?: Buffer,
+  clientId: string | null = null,
+  actorUsername: string | null = null,
 ): Promise<{ status: number; body: unknown }> {
   const { name, target_url, auth_method, user_secret_name, pass_secret_name, header_name, cookie_name, allow_private_network = false } = body;
 
@@ -130,8 +136,9 @@ export async function handleCreateProfile(
   const createSecrets = Array.isArray(body.create_secrets) ? body.create_secrets : [];
   const createdSecretNames: string[] = [];
 
-  // Validate every inline secret before writing any of them, so a single bad
-  // name/value aborts the whole request with nothing created.
+  // SV-AUD-010: validate every inline secret with the SAME central validators the
+  // /api/secrets route uses, before writing any of them, so a single bad
+  // name/value/environment/tags aborts the whole request with nothing created.
   let inlineDefs: { displayName: string; name: string; value: string; environment: string; tags: string[] }[];
   try {
     inlineDefs = createSecrets.map((entry) => {
@@ -140,20 +147,27 @@ export async function handleCreateProfile(
       if (!displayName || !value) {
         throw new ClientError("each create_secrets entry requires a non-empty name and value");
       }
+      // Central validators (validation.ts) — identical to handleCreateSecret.
+      // validateSecretName throws a plain Error; wrap it as a client error so an
+      // invalid name maps to 400 (validation) rather than 500.
       try {
         validateSecretName(displayName);
       } catch (err) {
         throw new ClientError((err as Error).message);
       }
+      const validValue = validateBoundedString(value, "value", LIMITS.SECRET_VALUE_MAX);
+      const validEnv = validateEnvironment(entry.environment ?? "production");
+      const validTags = validateTags(entry.tags);
       return {
         displayName,
         name: canonicalName(displayName),
-        value,
-        environment: entry.environment ?? "production",
-        tags: Array.isArray(entry.tags) ? entry.tags : [],
+        value: validValue,
+        environment: validEnv,
+        tags: validTags,
       };
     });
   } catch (err) {
+    if (err instanceof ValidationError) return validationErrorResponse(err);
     if (err instanceof ClientError) return { status: 400, body: { error: err.message } };
     return { status: 500, body: { error: (err as Error).message } };
   }
@@ -177,30 +191,33 @@ export async function handleCreateProfile(
   try {
     if (masterKey) {
       for (const def of inlineDefs) {
-        const { data: existing } = await supabase
-          .from("secrets")
-          .select("id")
-          .eq("name", def.name)
-          .eq("user_id", userId)
-          .maybeSingle();
-        if (existing) {
-          throw new ClientError(`Secret '${def.name}' already exists; cannot create it inline`);
-        }
-        const { encrypted } = await encryptSecret(def.value, masterKey);
-        const { error: secretError } = await supabase.from("secrets").insert({
-          name: def.name,
-          display_name: def.displayName,
-          user_id: userId,
-          environment: def.environment,
-          encrypted_blob: encrypted,
-          masked_preview: maskSecret(def.value),
-          key_prefix: generatePrefixSuffix(def.value).prefix,
-          key_suffix: generatePrefixSuffix(def.value).suffix,
-          tags: def.tags,
-        });
-        if (secretError) {
-          if (secretError.code === "23505") throw new ClientError(`Secret '${def.name}' already exists`);
-          throw new Error(secretError.message);
+        // SV-AUD-010: route every inline secret through the SAME canonical path
+        // as POST /api/secrets — scoped existence check, fail-closed critical
+        // audit (start→insert→finish), encryption with (userId,secretId) AAD,
+        // and insert. No inline write may bypass secrets:write authorization,
+        // central validation, or the critical-audit lifecycle.
+        const result = await createSecretValidated(
+          supabase,
+          masterKey,
+          def.displayName,
+          def.value,
+          def.environment,
+          def.tags,
+          userId,
+          clientId,
+          actorUsername,
+        );
+        if (result.status >= 400) {
+          // 409 already-exists, 503 audit-unavailable, etc. Roll back any inline
+          // secrets already created so nothing is orphaned, then surface the error.
+          if (createdSecretNames.length > 0) await rollbackSecrets(supabase, userId, createdSecretNames);
+          // Re-throw as the kind of error the surrounding try/catch maps to a
+          // client response, preserving the canonical status/body.
+          const body = (result.body as { error?: string; code?: string }) ?? {};
+          const err = new ClientError(body.error ?? "inline secret creation failed");
+          (err as any).status = result.status;
+          (err as any).code = body.code;
+          throw err;
         }
         createdSecretNames.push(def.name);
       }
@@ -215,7 +232,11 @@ export async function handleCreateProfile(
     // the proxy resolves it at dispatch. (We do not leak which exist.)
     void inlineNames;
   } catch (err) {
-    if (err instanceof ClientError) return { status: 400, body: { error: err.message } };
+    if (err instanceof ClientError) {
+      const status = (err as any).status ?? 400;
+      const code = (err as any).code;
+      return { status, body: { error: err.message, ...(code ? { code } : {}) } };
+    }
     return { status: 500, body: { error: (err as Error).message } };
   }
 
@@ -239,8 +260,11 @@ export async function handleCreateProfile(
 
   if (error) {
     // Profile creation failed: roll back every inline secret we just created so
-    // no orphan credential material is left behind (SV-034).
-    await rollbackSecrets(supabase, userId, createdSecretNames);
+    // no orphan credential material is left behind (SV-034). Each rollback also
+    // records a secret_delete audit event so the trail stays accurate — the
+    // per-secret secret_create rows were already finalized as "succeeded" by
+    // createSecretValidated, and this compensating delete must be visible (SV-AUD-010).
+    await rollbackSecrets(supabase, userId, createdSecretNames, clientId, actorUsername);
     if (error.code === "23505") return { status: 409, body: { error: `Profile '${canonicalProfileName}' already exists` } };
     return { status: 500, body: { error: error.message } };
   }
@@ -258,15 +282,28 @@ export async function handleCreateProfile(
 
 // Best-effort cleanup of inline-created secrets when profile creation fails.
 // Never throws — partial cleanup is preferable to leaving orphans, and the
-// caller already has a failure to report.
+// caller already has a failure to report. Each compensating delete is recorded
+// as a secret_delete audit event (SV-AUD-010) so the lifecycle is traceable.
 async function rollbackSecrets(
   supabase: SupabaseClient<Database, "secretvault">,
   userId: string,
   names: string[],
+  clientId: string | null = null,
+  actorUsername: string | null = null,
 ): Promise<void> {
   for (const name of names) {
     try {
       await supabase.from("secrets").delete().eq("name", name).eq("user_id", userId);
+      void recordAuditEvent(supabase, {
+        userId,
+        clientId,
+        actorUsername,
+        secretName: name,
+        accessType: "secret_delete",
+        caller: "rest:/api/service-profiles:rollback",
+        outcome: "succeeded",
+        metadata: { reason: "profile_create_failed_rollback" },
+      }).catch(() => undefined);
     } catch {
       // swallow — see comment above
     }

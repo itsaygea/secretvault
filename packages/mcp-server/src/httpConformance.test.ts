@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import net from "node:net";
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { encryptSecret } from "@secretvault/shared";
+import { encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 
 process.env.NODE_ENV = "test";
 process.env.SECRETVAULT_SUPABASE_URL = "http://supabase.test";
@@ -193,7 +193,10 @@ beforeAll(async () => {
   });
   upstreamBaseUrl = await listen(upstreamServer);
 
-  const encrypted = await encryptSecret("upstream-secret", masterKey);
+  const encrypted = await encryptSecret("upstream-secret", masterKey, {
+    purpose: ENCRYPTION_PURPOSE.SECRET,
+    aad: buildContextAad(ENCRYPTION_PURPOSE.SECRET, { userId: "user-1", recordId: "secret-1" }),
+  });
   const user = { id: "user-1", username: "conformance", is_admin: false };
   const fakeSupabase = new FakeSupabase({
     client_applications: [

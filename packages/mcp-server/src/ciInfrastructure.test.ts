@@ -85,7 +85,7 @@ describe("SV-029 CI PostgREST stack", () => {
     const init = readFileSync(join(repoRoot, "ci", "postgres-init.sql"), "utf8");
     expect(init).toMatch(/CREATE ROLE authenticator LOGIN/);
     expect(init).toMatch(/CREATE ROLE anon NOLOGIN/);
-    expect(init).toMatch(/IN ROLE service_role, anon/);
+    expect(init).toMatch(/IN ROLE sv_runtime, service_role, anon/);
   });
 });
 

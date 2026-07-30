@@ -147,6 +147,21 @@ jobs:
       - name: Assert PostgREST least-privilege matrix
         run: node ci/postgrest-permissions.mjs http://127.0.0.1:3001
 
+      # SV-AUD-013: prove the DATABASE enforces tenant isolation. Seed two
+      # tenant users, then assert cross-tenant select/insert/update/delete are
+      # denied and a dropped .eq("user_id") still returns only the caller's rows.
+      - name: Seed tenant users
+        run: |
+          set -e
+          SVC=$(node ci/mint-jwt.mjs service_role)
+          for uid in 00000000-0000-0000-0000-00000000000a 00000000-0000-0000-0000-00000000000b; do
+            curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:3001/rest/v1/users \
+              -H "Authorization: Bearer $SVC" -H "apikey: $SVC" -H "Content-Type: application/json" \
+              -d "{\"id\":\"$uid\",\"username\":\"ci-tenant-$uid\",\"password_hash\":\"x\",\"is_admin\":false}" || true
+          done
+      - name: Assert tenant isolation (SV-AUD-013)
+        run: node ci/tenant-isolation.mjs http://127.0.0.1:3001
+
       - name: Collect service logs
         if: always()
         run: docker compose -f docker-compose.yml -f ci/docker-compose.ci.yml logs --no-color

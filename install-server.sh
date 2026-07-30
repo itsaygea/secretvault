@@ -5,12 +5,19 @@
 # Supports 1-line execution:
 # curl -fsSL https://raw.githubusercontent.com/itsaygea/secretvault/main/install-server.sh | bash
 #
+# Supply-chain hardening (SV-AUD-012): for a verified install, export
+#   SECRETVAULT_RELEASE_TAG=<git tag or 40-char commit SHA>
+#   SECRETVAULT_TARBALL_SHA256=<sha256 of the tag's source tarball>
+# The installer then clones that immutable ref (never mutable `main`) and
+# verifies the SHA-256 before building, failing closed on any mismatch.
+# Without both values it falls back to `main` and prints a warning.
+#
 # Offers a 1-click bundled backend (local postgres:16-alpine + PostgREST, zero
 # external infrastructure) alongside the existing external-PostgreSQL and
 # Supabase Cloud options.
 # ==============================================================================
 
-set -eo pipefail
+set -euo pipefail
 
 main() {
   # Attach stdin to TTY if available (required for curl | bash execution)
@@ -37,6 +44,39 @@ main() {
     echo "       🔒 SecretVault Server Installer & Deployment Wizard (${VERSION})  "
     echo "════════════════════════════════════════════════════════════════════════"
     echo -e "${RESET}"
+  }
+
+  # SV-AUD-012: fail-closed SHA-256 verification of a downloaded artifact.
+  # Usage: verify_sha256 <file> <expected-sha256>. Exits 1 on any mismatch,
+  # missing file, or absent tooling (sha256sum / shasum).
+  verify_sha256() {
+    local file="$1"
+    local expected="$2"
+    if [ -z "$expected" ]; then
+      echo -e "${RED}Integrity verification requested but no checksum was provided. Aborting (fail-closed).${RESET}" >&2
+      exit 1
+    fi
+    if [ ! -f "$file" ]; then
+      echo -e "${RED}Integrity verification failed: ${file} not found. Aborting (fail-closed).${RESET}" >&2
+      exit 1
+    fi
+    local actual=""
+    if command -v sha256sum &>/dev/null; then
+      actual=$(sha256sum "$file" | awk '{print $1}')
+    elif command -v shasum &>/dev/null; then
+      actual=$(shasum -a 256 "$file" | awk '{print $1}')
+    else
+      echo -e "${RED}No sha256sum/shasum available to verify artifact integrity. Aborting (fail-closed).${RESET}" >&2
+      exit 1
+    fi
+    if [ "$actual" != "$expected" ]; then
+      echo -e "${RED}Integrity verification FAILED for ${file}.$RESET" >&2
+      echo -e "${RED}  expected: $expected${RESET}" >&2
+      echo -e "${RED}  actual:   $actual${RESET}" >&2
+      echo -e "${RED}The downloaded artifact does not match its published checksum. Aborting (fail-closed).${RESET}" >&2
+      exit 1
+    fi
+    echo -e "${GREEN}✓ Integrity verified (sha256 ${actual:0:16}…).${RESET}"
   }
 
 # Helper to read with default value (prints result to stdout, no eval)
@@ -173,6 +213,17 @@ echo -e "${GREEN}✓ All prerequisites met (Docker, Docker Compose, OpenSSL, cur
 # 2. Repo Directory & Files Setup
 # ------------------------------------------------------------------------------
 REPO_URL="https://github.com/itsaygea/secretvault.git"
+# SV-AUD-012: prefer an immutable release ref (tag or commit SHA) over mutable
+# `main`. Both the ref and its published tarball checksum must be supplied for a
+# verified install; missing either falls back to `main` with a warning.
+RELEASE_REF="${SECRETVAULT_RELEASE_TAG:-main}"
+EXPECTED_SHA256="${SECRETVAULT_TARBALL_SHA256:-}"
+ARCHIVE_REF="$RELEASE_REF"
+# GitHub archive tarballs for a branch use refs/heads/<branch>; for a tag/SHA
+# the ref is used as-is. Normalize so a branch name still resolves.
+if [ "$RELEASE_REF" = "main" ]; then
+  ARCHIVE_REF="refs/heads/main"
+fi
 
 if [ ! -f "docker-compose.yml" ]; then
   echo -e "${YELLOW}Notice: docker-compose.yml not found in current directory (${PWD}).${RESET}"
@@ -180,11 +231,34 @@ if [ ! -f "docker-compose.yml" ]; then
 
   if [ ! -d "$INSTALL_DIR" ]; then
     echo "Creating directory '$INSTALL_DIR' and fetching SecretVault repository..."
+    if [ "$RELEASE_REF" = "main" ]; then
+      echo -e "${YELLOW}WARNING (SV-AUD-012): SECRETVAULT_RELEASE_TAG not set — fetching mutable 'main'. Set SECRETVAULT_RELEASE_TAG and SECRETVAULT_TARBALL_SHA256 for a verified, immutable install.${RESET}"
+    else
+      echo -e "${GREEN}Fetching immutable release ref '${RELEASE_REF}'.${RESET}"
+    fi
     if command -v git &>/dev/null; then
-      git clone "$REPO_URL" "$INSTALL_DIR"
+      # --branch works for a tag or branch name; a 40-char commit SHA requires
+      # a shallow clone + checkout instead.
+      if printf '%s' "$RELEASE_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+        git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+        git -C "$INSTALL_DIR" fetch --depth 1 origin "$RELEASE_REF"
+        git -C "$INSTALL_DIR" checkout "$RELEASE_REF"
+      else
+        git clone --depth 1 --branch "$RELEASE_REF" "$REPO_URL" "$INSTALL_DIR"
+      fi
     else
       mkdir -p "$INSTALL_DIR"
-      curl -fsSL https://github.com/itsaygea/secretvault/archive/refs/heads/main.tar.gz | tar -xz -C "$INSTALL_DIR" --strip-components=1
+      TARBALL="$(mktemp)"
+      trap 'rm -f "$TARBALL"' EXIT
+      curl -fsSL "https://github.com/itsaygea/secretvault/archive/${ARCHIVE_REF}.tar.gz" -o "$TARBALL"
+      if [ -n "$EXPECTED_SHA256" ]; then
+        verify_sha256 "$TARBALL" "$EXPECTED_SHA256"
+      elif [ "$RELEASE_REF" != "main" ]; then
+        echo -e "${RED}Immutable ref '${RELEASE_REF}' requested without SECRETVAULT_TARBALL_SHA256 — refusing to install unverified. Aborting (fail-closed).${RESET}" >&2
+        exit 1
+      fi
+      tar -xz -C "$INSTALL_DIR" --strip-components=1 -f "$TARBALL"
+      rm -f "$TARBALL"
     fi
   fi
   cd "$INSTALL_DIR"
@@ -311,10 +385,20 @@ case "$BACKEND_OPTION" in
     # an HS256 service_role JWT minted against this secret.
     PGRST_JWT_SECRET=$(openssl rand -hex 32)
     SECRETVAULT_SUPABASE_SERVICE_KEY=$(mint_service_role_jwt "$PGRST_JWT_SECRET")
+    # SV-AUD-013: per-install authenticator password (PostgREST↔Postgres) and the
+    # raw JWT secret the app uses to mint short-lived per-request tenant tokens.
+    SV_AUTHENTICATOR_PASSWORD=$(openssl rand -hex 24)
+    SECRETVAULT_PGRST_JWT_SECRET="$PGRST_JWT_SECRET"
     SECRETVAULT_SUPABASE_URL="http://postgrest-proxy:8000"
     DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}"
     DB_SSL="false"
     echo -e "${GREEN}✓ Postgres password, PostgREST JWT secret, and service key generated.${RESET}"
+    # SV-AUD-013: stamp the per-install authenticator password into the bundled
+    # postgres init SQL (bind-mounted into postgres on first boot). The placeholder
+    # is replaced only here, so each install gets a unique network-internal password.
+    if [ -f bundled/postgres-init.sql ]; then
+      sed -i "s/__SV_AUTHENTICATOR_PASSWORD__/${SV_AUTHENTICATOR_PASSWORD}/g" bundled/postgres-init.sql
+    fi
     ;;
   2)
     echo -e "${CYAN}--- Step 3: PostgreSQL Database URL ---${RESET}"
@@ -491,6 +575,41 @@ if [ "${confirm_egress:-Y}" != "Y" ] && [ "${confirm_egress:-Y}" != "y" ]; then
   exit 1
 fi
 
+# ── Transport / TLS boundary (SV-AUD-001) ──────────────────────────────────
+# The container always binds 0.0.0.0 internally (so a TLS-terminating reverse
+# proxy on the Compose network can reach it). What makes plaintext EXTERNALLY
+# reachable is the host-side publish address (SECRETVAULT_PUBLISH_HOST), which
+# defaults to 127.0.0.1 (loopback). Make the actual topology explicit and refuse
+# to bake an externally-published plaintext config unless the operator types the
+# literal acknowledgement phrase. The runtime guard (transportSecurity.ts)
+# enforces the same fail-closed check again at boot — this is defence in depth.
+echo ""
+echo -e "${BOLD}Transport / TLS boundary${RESET}"
+echo -e "${CYAN}By default port 3004 is published on 127.0.0.1 (loopback) only. External access"
+echo -e "must go through a TLS-terminating reverse proxy (Caddy / Nginx / Tailscale Serve)"
+echo -e "— see docker-compose.caddy.yml and docs/install.md. Exposing plaintext HTTP on a"
+echo -e "non-loopback interface would leak passwords, session tokens, setup codes, and"
+echo -e "step-up data over the network.${RESET}"
+PUBLISH_HOST=$(prompt_with_default "Host-side publish address for port 3004" "127.0.0.1")
+
+EXTERNAL_PLAINTEXT="false"
+if [ "$PUBLISH_HOST" != "127.0.0.1" ] && [ "$PUBLISH_HOST" != "::1" ] && [ "$PUBLISH_HOST" != "localhost" ]; then
+  echo -e "${RED}WARNING: a non-loopback publish address (${PUBLISH_HOST}) makes the listener externally reachable.${RESET}"
+  echo -e "${RED}SecretVault refuses to start plaintext in production on a non-loopback interface unless${RESET}"
+  echo -e "${RED}you explicitly acknowledge the risk. This is only safe behind a TLS-terminating reverse${RESET}"
+  echo -e "${RED}proxy on a trusted private network.${RESET}"
+  echo -e "${BOLD}To allow externally-exposed plaintext, type exactly:${RESET} ${YELLOW}I-know-this-is-insecure${RESET}"
+  echo -e "${CYAN}(Leave blank to keep the safe loopback-only publish and terminate TLS with a proxy instead.)${RESET}"
+  PLAINTEXT_CONFIRM=$(prompt_with_default "Acknowledgement phrase (blank = abort external plaintext)" "")
+  if [ "$PLAINTEXT_CONFIRM" != "I-know-this-is-insecure" ]; then
+    echo -e "${YELLOW}External plaintext not confirmed. Reverting to the safe loopback-only publish.${RESET}"
+    echo -e "${YELLOW}Terminate TLS with a reverse proxy to expose the service externally.${RESET}"
+    PUBLISH_HOST="127.0.0.1"
+  else
+    EXTERNAL_PLAINTEXT="true"
+  fi
+fi
+
 
 # ------------------------------------------------------------------------------
 # 8. Write .env File & Restrict Permissions (safe encoding, no shell expansion)
@@ -545,6 +664,17 @@ umask 077
   printf "SECRETVAULT_EGRESS_ALLOWLIST=%s\n" "$(env_quote "$EGRESS_ALLOWLIST")"
   printf 'SECRETVAULT_PROXY_TIMEOUT_MS=30000\n'
 
+  printf '\n'
+  printf '# ── Transport / TLS boundary (SV-AUD-001) ────────────────────────────\n'
+  printf "# Host-side publish address for port 3004. Loopback by default; external\n"
+  printf "# exposure must go through a TLS-terminating reverse proxy.\n"
+  printf "SECRETVAULT_PUBLISH_HOST=%s\n" "$(env_quote "$PUBLISH_HOST")"
+  if [ "$EXTERNAL_PLAINTEXT" = "true" ]; then
+    printf "# Operator explicitly acknowledged external plaintext exposure.\n"
+    printf "SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL=1\n"
+    printf "SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL_CONFIRM=I-know-this-is-insecure\n"
+  fi
+
   # Bundled-mode credentials. Present only when the operator chose the bundled
   # backend so docker-compose.bundled.yml can resolve its required variables.
   if [ "$BUNDLED_MODE" = true ]; then
@@ -554,6 +684,10 @@ umask 077
     printf "POSTGRES_USER=%s\n" "$(env_quote "$POSTGRES_USER")"
     printf "POSTGRES_PASSWORD=%s\n" "$(env_quote "$POSTGRES_PASSWORD")"
     printf "PGRST_JWT_SECRET=%s\n" "$(env_quote "$PGRST_JWT_SECRET")"
+    # SV-AUD-013: raw JWT secret (app mints per-request tenant JWTs) + per-install
+    # authenticator password (consumed by the rendered postgres-init.sql).
+    printf "SECRETVAULT_PGRST_JWT_SECRET=%s\n" "$(env_quote "$SECRETVAULT_PGRST_JWT_SECRET")"
+    printf "SV_AUTHENTICATOR_PASSWORD=%s\n" "$(env_quote "$SV_AUTHENTICATOR_PASSWORD")"
   fi
 } > "$ENV_TMP"
 
@@ -602,11 +736,17 @@ if [ "$HEALTHY" = true ]; then
   echo -e "  REST API:       ${ALLOWED_ORIGINS%%,*}/api"
   echo -e "  (loopback: http://localhost:3004)"
   echo -e "------------------------------------------------------------------------"
-  echo -e "${YELLOW}⚠  TLS REQUIRED FOR EXTERNAL ACCESS (SV-020):${RESET}"
-  echo -e "  The listener is published on loopback only. Put a TLS-terminating reverse"
-  echo -e "  proxy (Caddy / Nginx / Tailscale Serve) in front before exposing it on the"
-  echo -e "  network — see docs/install.md. Never send passwords or setup codes over"
-  echo -e "  externally reachable plaintext HTTP."
+  echo -e "${YELLOW}⚠  TRANSPORT / TLS BOUNDARY (SV-020 / SV-AUD-001):${RESET}"
+  echo -e "  Port 3004 is published on host address: ${BOLD}${PUBLISH_HOST}${RESET}"
+  if [ "$EXTERNAL_PLAINTEXT" = "true" ]; then
+    echo -e "  ${RED}External plaintext exposure acknowledged by operator.${RESET}"
+    echo -e "  ${RED}Terminate TLS with a reverse proxy before relying on this boundary.${RESET}"
+  else
+    echo -e "  The listener is published on loopback only. Put a TLS-terminating reverse"
+    echo -e "  proxy (Caddy / Nginx / Tailscale Serve) in front before exposing it on the"
+    echo -e "  network — see docs/install.md. Never send passwords or setup codes over"
+    echo -e "  externally reachable plaintext HTTP."
+  fi
   echo -e "${YELLOW}IMPORTANT CREDENTIALS (SAVE/BACK UP THESE VALUES NOW):${RESET}"
   echo -e "  Master Encryption Key: ${BOLD}${MASTER_KEY}${RESET}"
   echo -e "  Initial Admin Password: ${BOLD}${ADMIN_PASS}${RESET}"

@@ -29,9 +29,51 @@ export async function resolveMcpAuth(
         clientId: user.clientId ?? null,
         credentialType: "linking_key",
         scopes: normalizeScopes(user.scopes),
+        keyVersion: user.keyVersion ?? 0,
+        epoch: user.sessionEpoch ?? 0,
       };
     }
   }
 
   return null;
+}
+
+/**
+ * SV-AUD-009: a comparable authorization snapshot for an MCP session. An
+ * established session is bound to the (user, client, key version, canonical
+ * scopes, session epoch) in effect at initialize time. On every subsequent
+ * request the live principal is re-resolved and its snapshot compared; any
+ * mismatch (scope downgrade, key regeneration, client deletion, password/factor
+ * change) closes the transport so long-lived SSE/streamable sessions cannot
+ * retain revoked write scopes.
+ *
+ * `mcp:write` downgrade detection: if the bound session had `mcp:write` but the
+ * current principal no longer does, the snapshot differs and the session closes.
+ */
+export interface McpAuthSnapshot {
+  userId: string;
+  clientId: string | null;
+  keyVersion: number;
+  /** Canonical, sorted scope set, including the write flag. */
+  scopes: string;
+  epoch: number;
+}
+
+export function mcpAuthSnapshot(p: Principal): McpAuthSnapshot {
+  return {
+    userId: p.userId,
+    clientId: p.clientId ?? null,
+    keyVersion: p.keyVersion ?? 0,
+    scopes: [...p.scopes].sort().join(","),
+    epoch: p.epoch ?? 0,
+  };
+}
+
+/** True iff every field of the two snapshots matches exactly. */
+export function mcpSnapshotsEqual(a: McpAuthSnapshot, b: McpAuthSnapshot): boolean {
+  return a.userId === b.userId
+    && a.clientId === b.clientId
+    && a.keyVersion === b.keyVersion
+    && a.scopes === b.scopes
+    && a.epoch === b.epoch;
 }

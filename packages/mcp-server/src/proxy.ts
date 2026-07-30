@@ -4,12 +4,12 @@ import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@secretvault/shared";
-import { decryptSecret, canonicalName } from "@secretvault/shared";
+import { decryptSecret, canonicalName, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import { getProfileForProxy } from "./serviceProfiles.js";
 import type { Principal } from "./authz.js";
-import { buildProxyTargetUrl, isProxyPathAllowed, sanitizeRequestHeaders, sanitizeResponseHeaders, validateResolvedTarget } from "./proxyPolicy.js";
+import { buildProxyTargetUrl, isProxyPathAllowed, sanitizeRequestHeaders, sanitizeResponseHeaders, validateResolvedTarget, createSensitiveValueSet } from "./proxyPolicy.js";
 import { finishAuditEvent, recordAuditEvent, startCriticalAuditEvent } from "./audit.js";
-import { getRequestId, writeErrorResponse } from "./httpContract.js";
+import { buildUpstreamErrorEnvelope, getRequestId, writeErrorResponse } from "./httpContract.js";
 
 const PROXY_BODY_LIMIT = 10 * 1024 * 1024;
 const configuredProxyTimeout = Number.parseInt(process.env.SECRETVAULT_PROXY_TIMEOUT_MS ?? "30000", 10);
@@ -127,7 +127,7 @@ export async function handleProxyRequest(
   const canonicalNames = secretNames.map(n => canonicalName(n));
   const { data: rows, error: dbError } = await supabase
     .from("secrets")
-    .select("name, encrypted_blob")
+    .select("id, name, encrypted_blob")
     .in("name", canonicalNames)
     .eq("user_id", userId);
 
@@ -141,7 +141,10 @@ export async function handleProxyRequest(
   const secrets = new Map<string, string>();
   for (const row of rows) {
     try {
-      secrets.set(row.name, await decryptSecret(row.encrypted_blob, masterKey));
+      secrets.set(row.name, await decryptSecret(row.encrypted_blob, masterKey, {
+        purpose: ENCRYPTION_PURPOSE.SECRET,
+        aad: buildContextAad(ENCRYPTION_PURPOSE.SECRET, { userId, recordId: row.id }),
+      }));
     } catch {
       await finishAuditEvent(supabase, auditId, "failed", { reason: "proxy_secret_decrypt_failed", secret_name: row.name });
       writeErrorResponse(res, 500, `Failed to decrypt '${row.name}'`, requestId, "PROXY_SECRET_DECRYPT_FAILED");
@@ -198,20 +201,33 @@ export async function handleProxyRequest(
   const passValue = secrets.get(canonicalName(profile.pass_secret_name!)) ?? "";
   const userValue = profile.user_secret_name ? secrets.get(canonicalName(profile.user_secret_name)) ?? "" : "";
 
+  // SV-AUD-003: track every rendering of the injected credentials for the life
+  // of this request so response headers/bodies echoing any of them are dropped.
+  const sensitive = createSensitiveValueSet();
+  if (passValue) sensitive.add(passValue);
+  if (userValue && userValue !== passValue) sensitive.add(userValue);
+
   switch (profile.auth_method) {
     case "basic": {
       const encoded = Buffer.from(`${userValue}:${passValue}`).toString("base64");
       headers["authorization"] = `Basic ${encoded}`;
+      // Track the composite Basic credential and its base64, both of which an
+      // attacker-controlled upstream could reflect verbatim or in an error body.
+      sensitive.add(`Basic ${encoded}`);
+      sensitive.add(encoded);
+      sensitive.add(`${userValue}:${passValue}`);
       break;
     }
     case "bearer":
       headers["authorization"] = `Bearer ${passValue}`;
+      sensitive.add(`Bearer ${passValue}`);
       break;
     case "header":
       headers[profile.header_name ?? "x-api-key"] = passValue;
       break;
     case "cookie":
       headers["cookie"] = `${profile.cookie_name ?? "session"}=${passValue}`;
+      sensitive.add(`${profile.cookie_name ?? "session"}=${passValue}`);
       break;
   }
 
@@ -299,14 +315,36 @@ export async function handleProxyRequest(
     const upstream = await upstreamResponse;
 
     // 10. Stream response back
-    const statusHeaders = sanitizeResponseHeaders(upstream.headers as Record<string, string | string[] | undefined>);
+    const upstreamStatus = upstream.statusCode ?? 502;
+    const isUpstreamError = upstreamStatus >= 400;
+    const statusHeaders = sanitizeResponseHeaders(
+      upstream.headers as Record<string, string | string[] | undefined>,
+      { sensitiveValues: sensitive },
+    );
     statusHeaders["X-Request-ID"] = requestId;
 
-    res.writeHead(upstream.statusCode ?? 502, statusHeaders);
-    await pipeline(upstream, res);
+    if (isUpstreamError) {
+      // SV-AUD-003: an attacker-controlled upstream error body could echo an
+      // injected credential. Discard its body entirely and substitute a stable
+      // SecretVault envelope. The status code is preserved; no upstream-derived
+      // bytes reach the caller. The upstream stream is drained then dropped.
+      const envelope = buildUpstreamErrorEnvelope(upstreamStatus, requestId);
+      statusHeaders["Content-Type"] = "application/json; charset=utf-8";
+      statusHeaders["Content-Length"] = Buffer.byteLength(envelope).toString();
+      delete statusHeaders["content-encoding"];
+      delete statusHeaders["transfer-encoding"];
+      res.writeHead(upstreamStatus, statusHeaders);
+      upstream.resume(); // drain and discard the upstream error body
+      res.end(envelope);
+    } else {
+      // Successful responses stream through unchanged (streaming + 10 MiB limit
+      // preserved); only the value-redacted headers above are applied.
+      res.writeHead(upstreamStatus, statusHeaders);
+      await pipeline(upstream, res);
+    }
 
-    await finishAuditEvent(supabase, auditId, (upstream.statusCode ?? 502) < 400 ? "succeeded" : "failed", {
-      upstream_status: upstream.statusCode ?? 502,
+    await finishAuditEvent(supabase, auditId, upstreamStatus < 400 ? "succeeded" : "failed", {
+      upstream_status: upstreamStatus,
     });
   } catch (err) {
     if (bodyOverflow) {

@@ -4,8 +4,11 @@
 # Resets a user's password (and optionally wipes their 2FA factors and revokes
 # active sessions) from inside the runtime container. This is the documented
 # emergency recovery path; it is intentionally noninteractive — the password
-# must arrive via --password, --password-file, or stdin, and --confirm must be
-# set, so a stray `docker exec` cannot reset credentials.
+# must arrive via --password-file or stdin (preferred), and --confirm must be
+# set, so a stray `docker exec` cannot reset credentials. The password is fed
+# to the CLI on stdin only; it never appears in the Node child's argv
+# (SV-AUD-007). --password is retained for the parent invocation but is piped
+# through rather than forwarded as a Node argument.
 #
 # Invocation (see docs/ops.md §2):
 #   docker exec secretvault-mcp secretvault-break-glass \
@@ -30,7 +33,8 @@ Usage: $prog --username <user> --confirm \\
        (--password <pw> | --password-file <path> | --password-stdin) [--reset-2fa]
 
   --username <user>          account to recover (default: admin)
-  --password <pw>            new password (prefer a file or stdin)
+  --password <pw>            new password (DEPRECATED; prefer a file or stdin —
+                             it is piped to the CLI, never passed as a Node arg)
   --password-file <path>     read new password from the first line of <path>
   --password-stdin           read new password from stdin
   --reset-2fa                also wipe the user's WebAuthn/TOTP factors
@@ -86,10 +90,13 @@ cli="/app/packages/mcp-server/dist/cli.js"
 [ -f "$cli" ] || cli="$(dirname "$0")/../packages/mcp-server/dist/cli.js"
 [ -f "$cli" ] || { echo "$prog: cannot find cli.js" >&2; exit 1; }
 
-set -- node "$cli" --username "$username" --password "$password"
+# SV-AUD-007: pass the password to Node via stdin, never as a --password
+# argument (which would expose it in /proc/<pid>/cmdline and ps). The CLI reads
+# the first line of stdin when --password-stdin is given.
+set -- node "$cli" --username "$username" --password-stdin
 [ "$reset_2fa" -eq 1 ] && set -- "$@" --reset-2fa
 
 # Run noninteractively. The CLI validates env + length, performs the reset,
 # revokes sessions, optionally wipes factors, records the audit event, and
-# prints the [break-glass] confirmation.
-"$@"
+# prints the [break-glass] confirmation. The password is piped on stdin only.
+printf '%s\n' "$password" | "$@"

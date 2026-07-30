@@ -34,6 +34,15 @@ const payload = {
   exp,
   ref: "ci",
 };
+// SV-AUD-013: optional tenant claims for the cross-tenant isolation test. When
+// JWT_TENANT_USER_ID is set, the token carries tenant_user_id / client_id /
+// is_admin so PostgREST exposes them as request.jwt.claims and the tenant RLS
+// policies (migration 022) bind. Absent = the legacy global token.
+if (process.env.JWT_TENANT_USER_ID) {
+  payload.tenant_user_id = process.env.JWT_TENANT_USER_ID;
+  if (process.env.JWT_CLIENT_ID) payload.client_id = process.env.JWT_CLIENT_ID;
+  payload.is_admin = process.env.JWT_IS_ADMIN === "1" || process.env.JWT_IS_ADMIN === "true";
+}
 const encHeader = b64url(JSON.stringify(header));
 const encPayload = b64url(JSON.stringify(payload));
 const signingInput = `${encHeader}.${encPayload}`;

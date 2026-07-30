@@ -74,9 +74,10 @@ Human operations in the Web UI (such as raw secret reveal) are strictly protecte
 
 SecretVault is designed to sit behind a TLS-terminating reverse proxy (Caddy, Nginx Proxy Manager, Tailscale Serve, Cloudflare Tunnel, …) in production. The defaults enforce that posture rather than ship an accidentally-exposed plaintext listener.
 
-**Inbound HTTP (SV-020):**
-- The Node listener binds to **loopback (`127.0.0.1`) by default**. The bundled `docker-compose.yml` publishes the port on the host loopback only; external exposure happens through the Caddy overlay (`docker-compose.caddy.yml`, ports 80/443) or your own proxy.
-- In production, a **plaintext listener bound to a non-loopback interface refuses to start** unless the operator sets the explicit, noisy override `SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL=1` together with `SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL_CONFIRM=I-know-this-is-insecure`. An empty prompt can never reach the unsafe path.
+**Inbound HTTP (SV-020 / SV-AUD-001):**
+- Two addresses govern exposure. `SECRETVAULT_BIND_HOST` is the interface the Node listener binds to *inside* its runtime (default `127.0.0.1`; the published image sets `0.0.0.0` so a proxy on the Compose network can reach it — this bind is container-internal and does not by itself expose plaintext). `SECRETVAULT_PUBLISH_HOST` is the *host-side* address port 3004 is published on (the Compose `ports:` left side); it defaults to **loopback (`127.0.0.1`)**, which is what keeps the plaintext listener off the network.
+- The bundled `docker-compose.yml` therefore publishes port 3004 on the host loopback only; external exposure happens through the Caddy overlay (`docker-compose.caddy.yml`, ports 80/443 — which nulls out the app's host-side port 3004 entirely) or your own proxy.
+- In production, a **plaintext listener published on a non-loopback host interface refuses to start** unless the operator sets the explicit, noisy override `SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL=1` together with `SECRETVAULT_ALLOW_PLAINTEXT_EXTERNAL_CONFIRM=I-know-this-is-insecure`. An empty prompt can never reach the unsafe path. The guard keys on the publish host, not the in-container bind host, so a legitimate container topology (bind `0.0.0.0`, publish `127.0.0.1`) is safe by default.
 - Native TLS termination is available with `SECRETVAULT_TLS_CERT` / `SECRETVAULT_TLS_KEY`.
 - Responses carry `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and — only when the request arrived over TLS (natively or via `X-Forwarded-Proto: https`) — `Strict-Transport-Security`. HSTS is never emitted over plaintext, so it cannot pin an insecure origin.
 - The WebAuthn RP ID and origin are derived proxy-aware (`X-Forwarded-Host` / `X-Forwarded-Proto`), so passkey enrollment works correctly behind the supported reverse proxy.
@@ -86,4 +87,18 @@ SecretVault is designed to sit behind a TLS-terminating reverse proxy (Caddy, Ng
 - The startup migration runner connects to PostgreSQL with **TLS on and certificate verification on by default**.
 - Pin a CA bundle with `SECRETVAULT_DATABASE_SSL_CA_FILE` (path) or `SECRETVAULT_DATABASE_SSL_CA` (inline PEM), and override the SNI/hostname check with `SECRETVAULT_DATABASE_SSL_SERVERNAME`.
 - Disabling verification is a deliberate, two-key dev action: `SECRETVAULT_DATABASE_SSL_INSECURE=1` **and** `SECRETVAULT_DATABASE_SSL_INSECURE_CONFIRM=I-know-this-is-insecure`. Set `SECRETVAULT_DATABASE_SSL=false` only for a local plaintext PostgreSQL instance. A database MITM presenting an untrusted certificate is rejected by default.
+
+## Database-Enforced Tenant Isolation (SV-AUD-013)
+
+Tenant isolation is enforced **in the database**, not only in application query filters. A missed application `.eq("user_id", ...)` predicate cannot become a cross-tenant breach.
+
+- **Runtime role `sv_runtime` (NOLOGIN / NOBYPASSRLS).** Authenticated application traffic is switched into `sv_runtime` by PostgREST per request. Because it cannot bypass RLS and the tenant tables have `FORCE ROW LEVEL SECURITY`, the per-request tenant claim is the real boundary.
+- **Per-request tenant JWT (internal-only).** For each authenticated request the app mints a short-lived (60s) HS256 JWT carrying `{ role: "sv_runtime", tenant_user_id, client_id, is_admin }`, stamped onto the shared PostgREST client's requests via an `AsyncLocalStorage`-bound `fetch`. This token is **never returned to clients**; it is distinct from the session HMAC token. PostgREST exposes it as the `request.jwt.claims` GUC.
+- **Tenant RLS policies.** `secrets`, `access_logs`, `service_profiles`, `client_applications`, `webauthn_credentials`, `totp_secrets`, `totp_pending_enrollments`, `totp_backup_codes` admit a row only when `user_id = current_tenant_id()` (or `is_admin`). Application `.eq("user_id")` filters remain as defense-in-depth, not the boundary.
+- **Non-tenant tables.** `users` (global auth lookup by username), `system_settings`, and `master_key_rotations` are scoped to `service_role` only (used by the pre-auth/global and admin paths); `sv_runtime` has no grant on them. `rate_limit_buckets` is `sv_runtime`-only and keyed by bucket.
+- **Least privilege + revokes.** Every policy carries an explicit `TO` clause; `PUBLIC`, `anon`, and `authenticated` are revoked across the schema.
+- **Network isolation (bundled stack).** Two Docker networks: `backend` (postgres + the `migrate` one-shot) and `frontend` (postgrest, postgrest-proxy, the app). PostgREST bridges both. The runtime app has **no direct `SECRETVAULT_DATABASE_URL`** — it reaches the database only through PostgREST, so a compromised app container cannot bypass RLS.
+- **Per-install credentials.** `install-server.sh` generates the PostgREST↔Postgres `authenticator` password and the JWT secret per install; there is no fixed bundled authenticator password.
+- **Threat boundary.** PostgREST is a trusted, in-process mediator on an isolated network. The JWT secret (`SECRETVAULT_PGRST_JWT_SECRET`) must be protected: anyone holding it can mint tenant tokens. On Supabase Cloud, where `service_role` is provisioned `BYPASSRLS` out-of-band, isolation depends on the `sv_runtime` role existing there and the app minting per-request tenant tokens into it.
+- **Proof.** A real PostgreSQL/PostgREST integration test (`ci/tenant-isolation.mjs`, run in the CI `docker-e2e` job) mints two tenant tokens and asserts cross-tenant SELECT/INSERT/UPDATE/DELETE are denied, including that an unfiltered SELECT returns only the caller's rows.
 

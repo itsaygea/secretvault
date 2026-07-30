@@ -26,6 +26,12 @@ if (arg === "rotate-master-key") {
   process.exit(0);
 }
 
+if (arg === "migrate-envelopes") {
+  const { handleMigrateEnvelopesCli } = await import("./cli/migrateEnvelopes.js");
+  await handleMigrateEnvelopesCli();
+  process.exit(0);
+}
+
 if (arg === "--help" || arg === "-h" || arg === "help") {
   console.log(`
 SecretVault CLI & Security Engine
@@ -35,6 +41,7 @@ Usage:
   secretvault secret <subcommand>  Manage secrets (list, create, rotate, delete)
   secretvault run <args...>         Inject secrets into command execution
   secretvault rotate-master-key     Re-encrypt stored database secrets
+  secretvault migrate-envelopes     Re-wrap ciphertext to v2 context-bound envelopes (--verify-only)
   secretvault                       Start SecretVault MCP Server (requires environment vars)
 
 Aliases: secretvault, secretvault-cli, secretvault-mcp
@@ -65,6 +72,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@secretvault/shared";
 import { resolveMasterKey } from "./keyLoader.js";
+import { initCursorKey } from "./pagination.js";
 import { registerAllTools } from "./tools/index.js";
 import {
   initAuth,
@@ -105,6 +113,7 @@ import {
   handleSelfRegister,
   handleAdminResetUserPassword,
   handleAdminResetUser2FA,
+  bumpSessionEpoch,
 } from "./users.js";
 import {
   initStepUpAuth,
@@ -120,6 +129,8 @@ import {
   handleTotpAuthenticate,
   handleTotpRegenerateBackupCodes,
   handleDisableTotp,
+  handleVerifyPasswordReauth,
+  consumeReauthGrant,
 } from "./stepup.js";
 import {
   handleListProfiles,
@@ -128,7 +139,7 @@ import {
 } from "./serviceProfiles.js";
 import { handleProxyRequest, destroyProxyAgents } from "./proxy.js";
 import { canonicalServiceName, isValidServiceName, safeDecodePathSegment } from "./proxyPolicy.js";
-import { resolveMcpAuth } from "./mcpAuth.js";
+import { resolveMcpAuth, mcpAuthSnapshot, mcpSnapshotsEqual } from "./mcpAuth.js";
 import { hasScope, hasRunnerScope, isSessionPrincipal, type Principal } from "./authz.js";
 import { recordAuditEvent, setAuditAlertSink } from "./audit.js";
 import { getRetentionPolicy, setRetentionPolicy, pruneOldAuditLogs, exportAuditLogs } from "./auditRetention.js";
@@ -145,10 +156,25 @@ import {
   getRequestId,
   initializeRequestContext,
   legacyApiSuccessor,
+  toErrorEnvelope,
   versionedApiPath,
   writeApiResponse,
   writeErrorResponse,
+  writeJson,
 } from "./httpContract.js";
+import {
+  RateLimiter,
+  MemoryRateLimitStore,
+  SupabaseRateLimitStore,
+  parseTrustedProxies,
+  resolveClientIp,
+  DEFAULT_LIMITS,
+  type RateLimitScope,
+  type RateLimitKeyParts,
+  type RateLimitStore,
+  type RateLimitResult,
+} from "./rateLimit.js";
+import { initTenantAuth, tenantAwareFetch, enterTenantContext, isTenantAuthInitialized } from "./tenantContext.js";
 
 export { resolveMcpAuth };
 
@@ -158,6 +184,29 @@ const PORT = parseInt(process.env.PORT ?? "3004", 10);
 const ALLOWED_ORIGINS = process.env.SECRETVAULT_ALLOWED_ORIGINS
   ? process.env.SECRETVAULT_ALLOWED_ORIGINS.split(",").map(s => s.trim()).filter(Boolean)
   : null;
+
+// SV-AUD-013: PostgREST JWT secret, used to mint short-lived per-request tenant
+// tokens so the database (not the application filter) enforces tenant isolation.
+// This is the same secret install-server.sh generates as PGRST_JWT_SECRET; the
+// app needs the raw secret (not just the service key) to mint tenant JWTs.
+const PGRST_JWT_SECRET = process.env.SECRETVAULT_PGRST_JWT_SECRET ?? "";
+if (PGRST_JWT_SECRET) initTenantAuth(PGRST_JWT_SECRET);
+
+// SV-AUD-011: trusted-proxy allowlist + rate-limit tuning. Forwarding headers
+// are honored only when the immediate peer matches one of these CIDRs/addresses;
+// with the default (empty) config, a direct connection can never rotate its
+// identity by spoofing X-Forwarded-For.
+const TRUSTED_PROXY_CONFIG = parseTrustedProxies(process.env.SECRETVAULT_TRUSTED_PROXIES);
+const RATE_LIMIT_LIMITS = buildRateLimitLimits({
+  windowMs: process.env.SECRETVAULT_RATE_LIMIT_WINDOW_MS,
+  maxLogin: process.env.SECRETVAULT_RATE_LIMIT_MAX_LOGIN,
+  maxRegister: process.env.SECRETVAULT_RATE_LIMIT_MAX_REGISTER,
+  maxTotp: process.env.SECRETVAULT_RATE_LIMIT_MAX_TOTP,
+});
+// The store is built once the supabase client exists (below); the limiter is
+// exported so tests can swap it via configureServerForTests.
+let rateLimitStore: RateLimitStore = new MemoryRateLimitStore();
+let rateLimiterInstance = new RateLimiter(rateLimitStore);
 
 if (process.argv[2] !== "run" && (!SUPABASE_URL || !SUPABASE_SERVICE_KEY)) {
   console.error(
@@ -180,6 +229,8 @@ try {
 // Initialize auth module with deterministic HMAC key derived from master key
 initAuth(masterKey);
 initStepUpAuth(masterKey);
+// Initialize cursor signing key (SV-AUD-014) — HMAC-authenticated pagination cursors.
+initCursorKey(masterKey);
 
 // Operational alerting for audit write/finalization failures, unknown rows,
 // and suspicious activity. The alert sink is the single fan-out point; the
@@ -219,8 +270,21 @@ let supabase: SupabaseClient<Database, "secretvault"> = (SUPABASE_URL && SUPABAS
         autoRefreshToken: false,
         persistSession: false,
       },
+      // SV-AUD-013: stamp the per-request tenant JWT onto each DB request when a
+      // tenant context is active, so PostgREST exposes it as request.jwt.claims
+      // and the tenant RLS policies enforce isolation at the database.
+      ...(isTenantAuthInitialized() ? { fetch: tenantAwareFetch(globalThis.fetch) } : {}),
     })
   : (null as unknown as SupabaseClient<Database, "secretvault">);
+
+// SV-AUD-011: in production back the limiter with the shared Postgres store so
+// every replica enforces against the same atomic counters. The MemoryRateLimitStore
+// default remains in place for the test harness, which swaps the client (and thus
+// would re-point this) via configureServerForTests.
+if (SUPABASE_URL && SUPABASE_SERVICE_KEY) {
+  rateLimitStore = new SupabaseRateLimitStore(supabase);
+  rateLimiterInstance = new RateLimiter(rateLimitStore);
+}
 
 // Generate setup code if no admin user exists yet. Test harnesses inject a
 // database adapter through configureServerForTests before making requests.
@@ -305,11 +369,58 @@ const assetCache = process.env.NODE_ENV !== "test" ? loadAssetCache() : { openap
 export function configureServerForTests(
   testSupabase: SupabaseClient<Database, "secretvault">,
   testMasterKey = masterKey,
+  options: {
+    rateLimitStore?: RateLimitStore;
+    rateLimitClock?: { now(): number };
+  } = {},
 ): void {
   supabase = testSupabase;
   masterKey = testMasterKey;
   initAuth(masterKey);
   initStepUpAuth(masterKey);
+  initCursorKey(masterKey);
+  // SV-AUD-011: tests inject a shared in-memory store (two-replica property) and
+  // a fake clock (deterministic window/cooldown). By default each test gets a
+  // FRESH in-memory store so a login loop in one suite cannot trip the limit for
+  // another. Production uses the Postgres store + system clock wired above.
+  rateLimitStore = options.rateLimitStore ?? new MemoryRateLimitStore();
+  rateLimiterInstance = new RateLimiter(rateLimitStore, options.rateLimitClock);
+}
+
+/**
+ * Build the per-scope rate-limit policy from optional env overrides, falling
+ * back to the safe DEFAULT_LIMITS. Each knob is clamped to a sane range so a
+ * misconfiguration cannot disable limiting (e.g. max=0).
+ */
+function buildRateLimitLimits(env: {
+  windowMs?: string;
+  maxLogin?: string;
+  maxRegister?: string;
+  maxTotp?: string;
+}): Record<RateLimitScope, ReturnType<typeof limitFor>> {
+  const windowMs = clampInt(env.windowMs, 1_000, 3_600_000, DEFAULT_LIMITS.login.windowMs);
+  return {
+    login: limitFor(windowMs, env.maxLogin, DEFAULT_LIMITS.login.maxRequests, DEFAULT_LIMITS.login),
+    register: limitFor(windowMs, env.maxRegister, DEFAULT_LIMITS.register.maxRequests, DEFAULT_LIMITS.register),
+    setup: limitFor(windowMs, env.maxRegister, DEFAULT_LIMITS.setup.maxRequests, DEFAULT_LIMITS.setup),
+    totp: limitFor(windowMs, env.maxTotp, DEFAULT_LIMITS.totp.maxRequests, DEFAULT_LIMITS.totp),
+  };
+}
+
+function limitFor(windowMs: number, maxEnv: string | undefined, defaultMax: number, base: { cooldownMs: number; maxCooldownMs: number }) {
+  return {
+    windowMs,
+    maxRequests: clampInt(maxEnv, 1, 1000, defaultMax),
+    cooldownMs: base.cooldownMs,
+    maxCooldownMs: base.maxCooldownMs,
+  };
+}
+
+function clampInt(raw: string | undefined, min: number, max: number, fallback: number): number {
+  if (!raw) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
 }
 
 // Factory: each connection gets its own McpServer instance scoped to a user
@@ -325,6 +436,8 @@ function createMcpServer(principal: Principal) {
 // Transport state
 const transports: Record<string, SSEServerTransport | StreamableHTTPServerTransport> = {};
 const sessionPrincipals: Record<string, Principal> = {};
+// SV-AUD-009: the authorization snapshot each session was bound to at init.
+const sessionSnapshots: Record<string, import("./mcpAuth.js").McpAuthSnapshot> = {};
 
 const MAX_BODY_SIZE = 1024 * 1024; // 1MB
 
@@ -360,11 +473,20 @@ async function handleStreamableHttpRequest(req: IncomingMessage, res: ServerResp
     // Reuse existing transport for known session
     if (sessionId && transports[sessionId]) {
       const boundPrincipal = sessionPrincipals[sessionId];
+      const boundSnapshot = sessionSnapshots[sessionId];
       const currentPrincipal = await resolveMcpAuth(req, url, supabase);
-      if (!boundPrincipal || !currentPrincipal ||
-          boundPrincipal.userId !== currentPrincipal.userId ||
-          boundPrincipal.clientId !== currentPrincipal.clientId ||
-          !hasScope(currentPrincipal, "mcp:read")) {
+      // SV-AUD-009: re-bind to the LIVE authorization. Any change to the client
+      // (scope downgrade, key regeneration, deletion → null), the user (epoch
+      // bump), or a stolen session under a different identity must close the
+      // transport so a long-lived session cannot retain revoked write scopes.
+      if (!boundPrincipal || !boundSnapshot || !currentPrincipal ||
+          !hasScope(currentPrincipal, "mcp:read") ||
+          !mcpSnapshotsEqual(boundSnapshot, mcpAuthSnapshot(currentPrincipal))) {
+        const transport = transports[sessionId];
+        try { await transport?.close(); } catch { /* best effort */ }
+        delete transports[sessionId];
+        delete sessionPrincipals[sessionId];
+        delete sessionSnapshots[sessionId];
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized MCP session" }, id: null }));
         return;
@@ -413,6 +535,7 @@ async function handleStreamableHttpRequest(req: IncomingMessage, res: ServerResp
             console.error(`[streamable-http] session initialized: ${sid}`);
             transports[sid] = transport;
             sessionPrincipals[sid] = mcpAuth;
+            sessionSnapshots[sid] = mcpAuthSnapshot(mcpAuth);
           },
         });
 
@@ -422,6 +545,7 @@ async function handleStreamableHttpRequest(req: IncomingMessage, res: ServerResp
             console.error(`[streamable-http] session closed: ${sid}`);
             delete transports[sid];
             delete sessionPrincipals[sid];
+            delete sessionSnapshots[sid];
           }
         };
 
@@ -497,6 +621,58 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     writeApiResponse(res, result.status, result.body, getRequestId(req));
   }
 
+  // SV-AUD-011: write a 429 RATE_LIMITED envelope with a Retry-After header.
+  // The body carries only the standard envelope (code/message/requestId/status);
+  // the bucket key and scope are emitted to the audit log, never to the client.
+  function sendRateLimited(result: RateLimitResult, scope: RateLimitScope, identity: string): void {
+    const requestId = getRequestId(req);
+    writeJson(res, 429, toErrorEnvelope(429, {
+      error: "Too many attempts",
+      code: "RATE_LIMITED",
+    }, requestId), requestId, { "Retry-After": String(result.retryAfterSeconds) });
+    void recordAuditEvent(supabase, {
+      secretName: "account",
+      accessType: "rate_limited",
+      caller: `rest:${req.method || "GET"}:${url.pathname}:${scope}`,
+      outcome: "denied",
+      sourceIp: resolveClientIp(req, TRUSTED_PROXY_CONFIG),
+      metadata: {
+        scope,
+        identity,
+        retry_after: String(result.retryAfterSeconds),
+        store_error: String(result.storeError),
+      },
+    }).catch(() => undefined);
+  }
+
+  // SV-AUD-011: charge one attempt against `scope` for the resolved identity.
+  // Returns true when the caller is denied (429 already written) so the route
+  // can `return` immediately. The identity is the normalized username/userId/
+  // client id where known, falling back to the trusted source IP alone — so a
+  // per-user limit cannot be diluted by omitting it, and a per-IP limit cannot
+  // be rotated by a spoofed header on a direct connection.
+  async function enforceRateLimit(
+    scope: RateLimitScope,
+    identity: string | undefined,
+    usernameForAudit: string | undefined,
+  ): Promise<boolean> {
+    const ip = resolveClientIp(req, TRUSTED_PROXY_CONFIG);
+    const parts: RateLimitKeyParts = { scope, ip, identity };
+    const result = await rateLimiterInstance.check(parts, RATE_LIMIT_LIMITS[scope]);
+    if (!result.allowed) {
+      sendRateLimited(result, scope, usernameForAudit ?? identity ?? ip);
+    }
+    return !result.allowed;
+  }
+
+  // Normalize an attempted username for rate-limit keying: lowercase + trim, and
+  // collapse to a stable "anon" when absent so an empty username still keys
+  // deterministically to the caller rather than diluting shared buckets.
+  function normalizeUsername(raw: string | undefined): string {
+    const v = (raw ?? "").trim().toLowerCase();
+    return v || "anon";
+  }
+
   async function parseBodyOr413(): Promise<unknown | null> {
     try {
       return await parseRequestBody(req);
@@ -514,6 +690,10 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
   if (url.pathname === "/api/auth/login" && req.method === "POST") {
     const body = await parseBodyOr413() as { username?: string; password?: string } | null;
     if (!body) return;
+    const attempted = normalizeUsername(body.username);
+    // SV-AUD-011: bound bcrypt work. Key on the attempted username + trusted IP
+    // so a per-account password-guessing attack cannot be diluted across IPs.
+    if (await enforceRateLimit("login", attempted, attempted)) return;
     return sendResponse(await handleAuthLogin(supabase, body));
   }
 
@@ -542,6 +722,9 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
   if ((url.pathname === "/v1/auth/setup" || url.pathname === "/api/auth/setup") && req.method === "POST") {
     const body = await parseBodyOr413() as { setup_code?: string; username?: string; password?: string } | null;
     if (!body) return;
+    // SV-AUD-011: setup is one-time, but still bounds the bcrypt hash + setup-code
+    // guessing surface. No username yet (first admin), so key on IP alone.
+    if (await enforceRateLimit("setup", undefined, undefined)) return;
     return sendResponse(await handleSetup(supabase, body, generateToken));
   }
 
@@ -554,6 +737,9 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
   if (url.pathname === "/api/auth/register" && req.method === "POST") {
     const body = await parseBodyOr413() as { username?: string; password?: string } | null;
     if (!body) return;
+    const attempted = normalizeUsername(body.username);
+    // SV-AUD-011: bound the bcrypt hash + username-squatting surface.
+    if (await enforceRateLimit("register", attempted, attempted)) return;
     return sendResponse(await handleSelfRegister(supabase, body));
   }
 
@@ -569,6 +755,18 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     }).catch(() => undefined);
     return sendResponse({ status: 401, body: { error: "Unauthorized" } });
   }
+
+  // SV-AUD-013: bind the authenticated tenant to this request's async context so
+  // every database query the route issues carries the tenant JWT. The tenant RLS
+  // policies (migration 022) then enforce ownership at the database — a missed
+  // application .eq("user_id") can no longer leak another tenant's rows. When
+  // tenant auth is not initialized (no JWT secret, e.g. tests), this is a no-op
+  // and the service-role client is used as-is.
+  enterTenantContext({
+    userId: authCtx.userId,
+    clientId: authCtx.clientId,
+    isAdmin: isSessionPrincipal(authCtx) && authCtx.isAdmin,
+  });
 
   const recordDenied = (reason: string, metadata: Record<string, string> = {}) => {
     bumpWindow(denialWindow, `denial:${authCtx.userId}:${reason}`, DENIAL_THRESHOLD, "repeated_denials", `denial:${authCtx.userId}:${reason}`);
@@ -601,6 +799,28 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     if (isSessionPrincipal(authCtx) && authCtx.isAdmin) return true;
     recordDenied("admin_session_required");
     void sendResponse({ status: 403, body: { error: "Forbidden" } });
+    return false;
+  };
+
+  /**
+   * SV-AUD-002: require a purpose-bound reauthentication grant for a factor-
+   * management operation. A normal session (or a generic reveal step-up) is
+   * never sufficient; the grant must be bound to exactly `operation` and is
+   * consumed one-time. Returns true when the caller may proceed.
+   */
+  const requireReauth = (operation: string): boolean => {
+    const header = req.headers["x-secretvault-reauth"];
+    const token = Array.isArray(header) ? header[0] : header;
+    if (token && consumeReauthGrant(token, authCtx.userId, operation)) return true;
+    recordDenied("reauth_required", { operation });
+    void sendResponse({
+      status: 403,
+      body: {
+        error: "Recent reauthentication required for this factor operation",
+        code: "REAUTH_REQUIRED",
+        operation,
+      },
+    });
     return false;
   };
 
@@ -746,7 +966,12 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     const body = await parseBodyOr413() as Parameters<typeof handleCreateProfile>[2] | null;
     if (!body) return;
     if (body.allow_private_network && !requireAdminSession()) return;
-    return sendResponse(await handleCreateProfile(supabase, authCtx.userId, body, isSessionPrincipal(authCtx) && authCtx.isAdmin, masterKey));
+    // SV-AUD-010: creating inline secret rows through create_secrets is a secret
+    // write — require secrets:write in addition to profiles:write whenever any
+    // are present, so a linking key holding only profiles:write cannot bypass the
+    // secret-creation authorization, validation, and critical-audit lifecycle.
+    if (Array.isArray(body.create_secrets) && body.create_secrets.length > 0 && !requireScope("secrets:write")) return;
+    return sendResponse(await handleCreateProfile(supabase, authCtx.userId, body, isSessionPrincipal(authCtx) && authCtx.isAdmin, masterKey, authCtx.clientId, authCtx.username));
   }
 
   const profileDeleteMatch = url.pathname.match(/^\/api\/service-profiles\/([^/]+)$/);
@@ -813,11 +1038,18 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
   const passkeyDeleteMatch = url.pathname.match(/^\/api\/auth\/webauthn\/credentials\/([^/]+)$/);
   if (passkeyDeleteMatch && req.method === "DELETE") {
     if (!requireSession()) return;
-    return sendResponse(await handleDeletePasskey(supabase, authCtx.userId, passkeyDeleteMatch[1]));
+    // SV-AUD-002: deleting a passkey requires an existing-factor reauth grant
+    // bound to exactly this credential id, then revokes older sessions.
+    if (!requireReauth(`webauthn:delete:${passkeyDeleteMatch[1]}`)) return;
+    const res = await handleDeletePasskey(supabase, authCtx.userId, passkeyDeleteMatch[1]);
+    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
+    return sendResponse(res);
   }
 
   if (url.pathname === "/api/auth/webauthn/register-options" && req.method === "POST") {
     if (!requireSession()) return;
+    // SV-AUD-002: enrolling a passkey requires current-password reauth (webauthn:add).
+    if (!requireReauth("webauthn:add")) return;
     return sendResponse(await handleWebAuthnRegisterOptions(supabase, authCtx.userId, authCtx.username, rpID));
   }
 
@@ -825,7 +1057,12 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     if (!requireSession()) return;
     const body = await parseBodyOr413() as { response?: any; device_name?: string } | null;
     if (!body) return;
-    return sendResponse(await handleWebAuthnRegisterVerify(supabase, authCtx.userId, rpID, origin, body));
+    // The registration challenge was issued only because a webauthn:add grant
+    // was consumed at register-options; verifying it adds a factor, so revoke
+    // older sessions on success.
+    const res = await handleWebAuthnRegisterVerify(supabase, authCtx.userId, rpID, origin, body);
+    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
+    return sendResponse(res);
   }
 
   if (url.pathname === "/api/auth/webauthn/authenticate-options" && req.method === "POST") {
@@ -835,13 +1072,25 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
 
   if (url.pathname === "/api/auth/webauthn/authenticate-verify" && req.method === "POST") {
     if (!requireSession()) return;
-    const body = await parseBodyOr413() as { response?: any } | null;
+    const body = await parseBodyOr413() as { response?: any; resource?: string; operation?: string } | null;
     if (!body) return;
     return sendResponse(await handleWebAuthnAuthVerify(supabase, authCtx.userId, rpID, origin, body));
   }
 
   if (url.pathname === "/api/auth/totp/setup" && req.method === "POST") {
     if (!requireSession()) return;
+    // SV-AUD-002: starting TOTP enrollment requires reauth. First enrollment
+    // needs current-password reauth (totp:add); replacing an existing verified
+    // factor needs an existing-factor step-up (totp:replace). The required
+    // operation is determined from the user's actual factor state.
+    const { data: existingTotp } = await supabase
+      .from("totp_secrets")
+      .select("id")
+      .eq("user_id", authCtx.userId)
+      .eq("verified", true)
+      .maybeSingle();
+    const totpOp = existingTotp ? "totp:replace" : "totp:add";
+    if (!requireReauth(totpOp)) return;
     return sendResponse(await handleTotpSetup(supabase, masterKey, authCtx.userId, authCtx.username));
   }
 
@@ -854,13 +1103,22 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     if (!requireSession()) return;
     const body = await parseBodyOr413() as { code?: string } | null;
     if (!body) return;
-    return sendResponse(await handleTotpVerifySetup(supabase, masterKey, authCtx.userId, body));
+    // SV-AUD-011: bound the 6-digit enrollment-verify guessing surface per user.
+    if (await enforceRateLimit("totp", authCtx.userId, authCtx.username)) return;
+    // The pending enrollment exists only because setup was reauth-gated; verifying
+    // it promotes/replaces the factor, so revoke older sessions on success.
+    const res = await handleTotpVerifySetup(supabase, masterKey, authCtx.userId, body);
+    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
+    return sendResponse(res);
   }
 
   if (url.pathname === "/api/auth/totp/authenticate" && req.method === "POST") {
     if (!requireSession()) return;
-    const body = await parseBodyOr413() as { code?: string } | null;
+    const body = await parseBodyOr413() as { code?: string; resource?: string; operation?: string } | null;
     if (!body) return;
+    // SV-AUD-011: bound both the 6-digit TOTP and the backup-code online-guessing
+    // surface per user — the strictest limit, since this is the live login step-up.
+    if (await enforceRateLimit("totp", authCtx.userId, authCtx.username)) return;
     return sendResponse(await handleTotpAuthenticate(supabase, masterKey, authCtx.userId, body));
   }
 
@@ -871,7 +1129,24 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
 
   if (url.pathname === "/api/auth/totp" && req.method === "DELETE") {
     if (!requireSession()) return;
-    return sendResponse(await handleDisableTotp(supabase, authCtx.userId));
+    // SV-AUD-002: disabling TOTP requires an existing-factor reauth grant, then
+    // revokes older sessions.
+    if (!requireReauth("totp:disable")) return;
+    const res = await handleDisableTotp(supabase, authCtx.userId);
+    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
+    return sendResponse(res);
+  }
+
+  // SV-AUD-002: current-password reauthentication mints a purpose-bound grant
+  // for a first-factor enrollment operation (totp:add / webauthn:add). Passwords
+  // and grants travel only in the request/response body — never URLs or storage.
+  if (url.pathname === "/api/auth/reauth/password" && req.method === "POST") {
+    if (!requireSession()) return;
+    const body = await parseBodyOr413() as { password?: string; operation?: string } | null;
+    if (!body) return;
+    // SV-AUD-011: bound the current-password re-guess used to mint a factor grant.
+    if (await enforceRateLimit("totp", authCtx.userId, authCtx.username)) return;
+    return sendResponse(await handleVerifyPasswordReauth(supabase, authCtx.userId, body));
   }
 
   // POST /api/secrets/:name/reveal
@@ -1172,6 +1447,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     const transport = new SSEServerTransport("/message", res);
     transports[transport.sessionId] = transport;
     sessionPrincipals[transport.sessionId] = mcpAuth;
+    sessionSnapshots[transport.sessionId] = mcpAuthSnapshot(mcpAuth);
 
     const clientServer = createMcpServer(mcpAuth);
     clientServer.connect(transport)
@@ -1182,6 +1458,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       console.error(`[sse] closed: ${transport.sessionId}`);
       delete transports[transport.sessionId];
       delete sessionPrincipals[transport.sessionId];
+      delete sessionSnapshots[transport.sessionId];
     });
     return;
   }
@@ -1195,12 +1472,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       return;
     }
 
+    // SV-AUD-009: re-bind to the live authorization snapshot; close on mismatch.
     const boundPrincipal = sessionPrincipals[sessionId];
+    const boundSnapshot = sessionSnapshots[sessionId];
     const currentPrincipal = await resolveMcpAuth(req, url, supabase);
-    if (!boundPrincipal || !currentPrincipal ||
-        boundPrincipal.userId !== currentPrincipal.userId ||
-        boundPrincipal.clientId !== currentPrincipal.clientId ||
-        !hasScope(currentPrincipal, "mcp:read")) {
+    if (!boundPrincipal || !boundSnapshot || !currentPrincipal ||
+        !hasScope(currentPrincipal, "mcp:read") ||
+        !mcpSnapshotsEqual(boundSnapshot, mcpAuthSnapshot(currentPrincipal))) {
+      const transport = transports[sessionId];
+      try { await transport?.close(); } catch { /* best effort */ }
+      delete transports[sessionId];
+      delete sessionPrincipals[sessionId];
+      delete sessionSnapshots[sessionId];
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Unauthorized MCP session" }));
       return;

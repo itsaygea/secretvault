@@ -12,7 +12,7 @@
 #   docker compose -f docker-compose.yml -f ci/docker-compose.ci.yml ...
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     environment:
       POSTGRES_PASSWORD: ci-password
       POSTGRES_DB: postgres
@@ -28,7 +28,7 @@ services:
   # the schema. PostgREST caches the schema at startup, so the tables must
   # already exist when it first connects.
   migrate:
-    image: node:22-alpine
+    image: node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32
     working_dir: /app
     depends_on:
       postgres:
@@ -49,7 +49,7 @@ services:
     command: ["node", "/app/packages/mcp-server/dist/migrate.js"]
 
   postgrest:
-    image: postgrest/postgrest:v12.2.3
+    image: postgrest/postgrest:v12.2.3@sha256:729bf65c733b73f5b52777f0e4b853f22ed73aa67a22d38269d289779b0a8401
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -73,7 +73,7 @@ services:
   # /<table>. This nginx proxy rewrites the prefix, mirroring the route Kong
   # adds in real self-hosted Supabase. CI-only.
   postgrest-proxy:
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     depends_on:
       - postgrest
     volumes:

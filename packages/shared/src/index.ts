@@ -1,6 +1,5 @@
 export type {
   Secret,
-  SecretReference,
   AccessLog,
   CreateSecretInput,
   SecretVaultConfig,
@@ -16,9 +15,14 @@ export {
   deriveDEK,
   encryptSecret,
   decryptSecret,
-  generateReference,
+  envelopeVersion,
+  envelopeKeyId,
+  ENCRYPTION_PURPOSE,
+  buildContextAad,
+  MasterKeyRing,
   type EncryptOptions,
   type DecryptOptions,
+  type EncryptionPurpose,
 } from "./crypto.js";
 
 export { canonicalName, extractPrefix, validateSecretName } from "./naming.js";

@@ -6,6 +6,7 @@ import { encryptSecret, maskSecret, generatePrefixSuffix, validateSecretName, ca
 import { safeResponse } from "../safeResponse.js";
 import { hasScope, type Principal } from "../authz.js";
 import { finishAuditEvent, recordAuditEvent, startCriticalAuditEvent } from "../audit.js";
+import { safeErrorMessage } from "../dbErrors.js";
 
 const inputSchema = {
   name: z.string().describe("Name for the secret"),
@@ -33,7 +34,7 @@ export function registerCreateSecret(server: McpServer, supabase: SupabaseClient
     try {
       validateSecretName(displayName);
     } catch (err) {
-      return { content: [{ type: "text" as const, text: safeResponse({ error: (err as Error).message }) }] };
+      return { content: [{ type: "text" as const, text: safeResponse({ error: safeErrorMessage(err) }) }] };
     }
 
     const name = canonicalName(displayName);
@@ -81,7 +82,7 @@ export function registerCreateSecret(server: McpServer, supabase: SupabaseClient
 
       if (error) {
         await finishAuditEvent(supabase, auditId, "failed", { reason: "secret_insert_failed" });
-        return { content: [{ type: "text" as const, text: safeResponse({ error: error.message }) }] };
+        return { content: [{ type: "text" as const, text: safeResponse({ error: safeErrorMessage(error) }) }] };
       }
 
       await finishAuditEvent(supabase, auditId, "succeeded");

@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
-import { clampPageSize, decodeCursor, decodeBeforeCursor, encodeCursor, encodeBeforeCursor, paginateQuery } from "./pagination.js";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { clampPageSize, decodeCursor, decodeBeforeCursor, encodeCursor, encodeBeforeCursor, escapePostgrestValue, initCursorKey, paginateQuery } from "./pagination.js";
 import { registerListSecrets } from "./tools/listSecrets.js";
 import { registerSearchSecrets } from "./tools/searchSecrets.js";
+
+const UUID_A = "00000000-0000-4000-8000-000000000001";
+const UUID_B = "00000000-0000-4000-8000-000000000002";
+
+// SV-AUD-014: cursor HMAC key is derived from the master key at boot.
+beforeAll(() => {
+  initCursorKey(Buffer.alloc(32, 7));
+});
 
 describe("pagination utilities", () => {
   describe("clampPageSize", () => {
@@ -28,9 +36,9 @@ describe("pagination utilities", () => {
 
   describe("cursor encode/decode", () => {
     it("round-trips an after cursor", () => {
-      const cursor = encodeCursor("my_secret", "uuid-123");
+      const cursor = encodeCursor("my_secret", UUID_A);
       const decoded = decodeCursor(cursor);
-      expect(decoded).toEqual({ after: "my_secret", tiebreaker: "uuid-123" });
+      expect(decoded).toEqual({ after: "my_secret", tiebreaker: UUID_A });
     });
 
     it("returns null for malformed after cursor", () => {
@@ -38,13 +46,59 @@ describe("pagination utilities", () => {
     });
 
     it("round-trips a before cursor", () => {
-      const cursor = encodeBeforeCursor("2026-07-26T00:00:00Z", "uuid-456");
+      const cursor = encodeBeforeCursor("2026-07-26T00:00:00Z", UUID_B);
       const decoded = decodeBeforeCursor(cursor);
-      expect(decoded).toEqual({ before: "2026-07-26T00:00:00Z", tiebreaker: "uuid-456" });
+      expect(decoded).toEqual({ before: "2026-07-26T00:00:00Z", tiebreaker: UUID_B });
     });
 
     it("returns null for malformed before cursor", () => {
       expect(decodeBeforeCursor("garbage")).toBeNull();
+    });
+
+    // SV-AUD-014: a tampered signature must never reach the query builder.
+    it("rejects a cursor whose signature was tampered with", () => {
+      const cursor = encodeCursor("victim", UUID_A);
+      const [ver, payload] = cursor.split(".");
+      const forgedSig = "A".repeat(43); // valid base64url length, wrong value
+      const tampered = `${ver}.${payload}.${forgedSig}`;
+      expect(decodeCursor(tampered)).toBeNull();
+      expect(decodeBeforeCursor(tampered)).toBeNull();
+    });
+
+    // SV-AUD-014 PoC: grammar-injection payload encoded into an unsigned
+    // cursor must be rejected — it carries no valid signature.
+    it("rejects a grammar-injection payload carried without a valid signature", () => {
+      const poison = Buffer.from(
+        `after:name),user_id.neq.victim|${UUID_A}`,
+        "utf8",
+      ).toString("base64url");
+      expect(decodeCursor(`v1.${poison}.fakesig`)).toBeNull();
+    });
+
+    it("rejects a wrong version", () => {
+      const cursor = encodeCursor("my_secret", UUID_A).replace(/^v1\./, "v2.");
+      expect(decodeCursor(cursor)).toBeNull();
+    });
+
+    it("rejects a non-UUID tiebreaker", () => {
+      const cursor = encodeCursor("my_secret", "not-a-uuid");
+      expect(decodeCursor(cursor)).toBeNull();
+    });
+
+    it("rejects an empty field", () => {
+      const cursor = encodeCursor("", UUID_A);
+      expect(decodeCursor(cursor)).toBeNull();
+    });
+
+    it("rejects an oversize field", () => {
+      const cursor = encodeCursor("x".repeat(300), UUID_A);
+      expect(decodeCursor(cursor)).toBeNull();
+    });
+
+    it("escapes PostgREST-significant characters in values", () => {
+      expect(escapePostgrestValue('a.b,(c)')).toBe('"a.b,(c)"');
+      // embedded quotes are doubled
+      expect(escapePostgrestValue('a"b')).toBe('"a""b"');
     });
   });
 
@@ -109,7 +163,7 @@ function mockQueryBuilder(returnedRows: any[]) {
 describe("list_secrets tool pagination", () => {
   it("applies cursor predicate when cursor is provided", async () => {
     const rows = [
-      { id: "s1", name: "alpha", display_name: "Alpha", environment: "production", masked_preview: "abc***xyz", tags: [] },
+      { id: UUID_A, name: "alpha", display_name: "Alpha", environment: "production", masked_preview: "abc***xyz", tags: [] },
     ];
     const { builder, captured } = mockQueryBuilder(rows);
     const supabase = { from: vi.fn(() => builder) } as any;
@@ -119,12 +173,31 @@ describe("list_secrets tool pagination", () => {
     registerListSecrets(server as any, supabase, principal);
 
     const handler = server._tools["list_secrets"].handler;
-    const cursor = encodeCursor("alpha", "s1");
+    const cursor = encodeCursor("alpha", UUID_A);
     const result = await handler({ cursor, page_size: 10 });
 
-    expect(captured.or).toContain("name.gt.alpha");
-    expect(captured.or).toContain("id.gt.s1");
+    // SV-AUD-014: validated cursor values are PostgREST-escaped (quoted).
+    expect(captured.or).toContain('name.gt."alpha"');
+    expect(captured.or).toContain(`id.gt."${UUID_A}"`);
     expect(result.content[0].text).toBeDefined();
+  });
+
+  // SV-AUD-014: a malformed/tampered cursor is dropped, never reaches .or().
+  it("ignores an invalid cursor instead of building a predicate", async () => {
+    const rows = [
+      { id: UUID_A, name: "alpha", display_name: "Alpha", environment: "production", masked_preview: "abc***xyz", tags: [] },
+    ];
+    const { builder, captured } = mockQueryBuilder(rows);
+    const supabase = { from: vi.fn(() => builder) } as any;
+    const server = mockMcpServer();
+    const principal = mockPrincipal();
+
+    registerListSecrets(server as any, supabase, principal);
+
+    const handler = server._tools["list_secrets"].handler;
+    await handler({ cursor: "after:name),user_id.neq.victim|bogus", page_size: 10 });
+
+    expect(captured.or).toBeUndefined();
   });
 
   it("limits results to page_size + 1 for has-more detection", async () => {
@@ -210,11 +283,11 @@ describe("search_secrets tool pagination", () => {
     registerSearchSecrets(server as any, supabase, principal);
 
     const handler = server._tools["search_secrets"].handler;
-    const cursor = encodeCursor("alpha_key", "s1");
+    const cursor = encodeCursor("alpha_key", UUID_A);
     const result = await handler({ tags: ["api"], cursor, page_size: 50 });
 
     expect(captured["contains_tags"]).toEqual(["api"]);
-    expect(captured.or).toContain("id.gt.s1");
+    expect(captured.or).toContain(`id.gt."${UUID_A}"`);
     const body = JSON.parse(result.content[0].text);
     expect(body.data).toHaveLength(1);
   });

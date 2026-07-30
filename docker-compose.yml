@@ -4,13 +4,20 @@ services:
     image: secretvault-mcp:latest
     container_name: secretvault-mcp
     restart: unless-stopped
-    # SV-020: the plaintext HTTP listener is published on the host loopback
-    # interface only. External exposure must go through a TLS-terminating
-    # reverse proxy (see docker-compose.caddy.yml / docs/install.md). To expose
-    # this port directly on all interfaces, set SECRETVAULT_BIND_HOST and publish
-    # 0.0.0.0:3004:3004 — but terminate TLS first (native certs or a proxy).
+    # SV-AUD-001 / SV-020: the plaintext HTTP listener is published on the host
+    # loopback interface only by default. The container itself binds 0.0.0.0
+    # (set in the image via SECRETVAULT_BIND_HOST) so a TLS-terminating reverse
+    # proxy on this Compose network (see docker-compose.caddy.yml / docs/install.md)
+    # can reach it. External exposure must go through that proxy.
+    #
+    # SECRETVAULT_PUBLISH_HOST controls the HOST-side publish address — this is
+    # what determines whether plaintext is externally reachable. It defaults to
+    # 127.0.0.1 (loopback). To publish on all interfaces set
+    # SECRETVAULT_PUBLISH_HOST=0.0.0.0 — but terminate TLS first (native certs
+    # or a proxy); the runtime guard will otherwise refuse to start plaintext
+    # in production unless both unsafe override flags are also set.
     ports:
-      - "${SECRETVAULT_BIND_HOST:-0.0.0.0}:3004:3004"
+      - "${SECRETVAULT_PUBLISH_HOST:-127.0.0.1}:3004:3004"
     env_file:
       - .env
     healthcheck:

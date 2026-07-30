@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import bcrypt from "bcryptjs";
 import { authenticator } from "otplib";
-import { encryptSecret } from "@secretvault/shared";
+import { encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import {
   initStepUpAuth,
   handleTotpSetup,
@@ -143,7 +143,10 @@ describe("Factor lifecycle (SV-013, SV-014, SV-015, SV-067)", () => {
 
   it("TOTP reconfigure stores pending enrollment without disabling verified factor (SV-013)", async () => {
     const { store, supabase } = createFactorStore();
-    const { encrypted } = await encryptSecret(SECRET, MASTER);
+    const { encrypted } = await encryptSecret(SECRET, MASTER, {
+      purpose: ENCRYPTION_PURPOSE.TOTP_PENDING,
+      aad: buildContextAad(ENCRYPTION_PURPOSE.TOTP_PENDING, { userId: "user-1", recordId: "user-1" }),
+    });
     store.totp_secrets.push({
       id: "totp-live",
       user_id: "user-1",
@@ -207,7 +210,10 @@ describe("Factor lifecycle (SV-013, SV-014, SV-015, SV-067)", () => {
     store.totp_secrets.push({
       id: "totp-3",
       user_id: "user-3",
-      secret_encrypted: (await encryptSecret(SECRET, MASTER)).encrypted,
+      secret_encrypted: (await encryptSecret(SECRET, MASTER, {
+        purpose: ENCRYPTION_PURPOSE.TOTP_PENDING,
+        aad: buildContextAad(ENCRYPTION_PURPOSE.TOTP_PENDING, { userId: "user-3", recordId: "user-3" }),
+      })).encrypted,
       verified: true,
     });
     store.totp_backup_codes.push({ id: "bc-1", user_id: "user-3", code_hash: hash });
@@ -236,7 +242,10 @@ describe("Factor lifecycle (SV-013, SV-014, SV-015, SV-067)", () => {
     store.totp_secrets.push({
       id: "totp-4",
       user_id: "user-4",
-      secret_encrypted: (await encryptSecret(SECRET, MASTER)).encrypted,
+      secret_encrypted: (await encryptSecret(SECRET, MASTER, {
+        purpose: ENCRYPTION_PURPOSE.TOTP_PENDING,
+        aad: buildContextAad(ENCRYPTION_PURPOSE.TOTP_PENDING, { userId: "user-4", recordId: "user-4" }),
+      })).encrypted,
       verified: true,
     });
     // Intentionally unusable hash — would hang/fail if scanned on 6-digit path
