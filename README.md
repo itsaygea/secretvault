@@ -98,17 +98,24 @@ curl -fsSL https://raw.githubusercontent.com/itsaygea/secretvault/main/install-c
 
 #### Option 2B: Terminal Secret Manager CLI
 
-Manage secrets directly from your terminal or SSH shell:
+Manage secrets directly from your terminal or SSH shell using `secretvault` or `securevault`:
 
 ```bash
-# Setup developer tool integrations
-npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp setup
+# Launch interactive terminal manager
+secretvault
+# (or typing securevault)
 
-# Manage secrets via CLI
-npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret list
-npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret create
-npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret rotate
-npx --package=git+https://github.com/itsaygea/secretvault.git secretvault-mcp secret delete
+# Auto-update CLI binaries to latest version
+secretvault update
+
+# Setup developer tool integrations
+secretvault setup
+
+# Direct subcommand management
+secretvault secret list
+secretvault secret create
+secretvault secret rotate
+secretvault secret delete
 ```
 
 > 📖 **Full Installation Guide**: See **[docs/install.md](docs/install.md)** for detailed server options, PostgreSQL migrations, and Caddy HTTPS setup.
