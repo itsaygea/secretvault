@@ -3,6 +3,12 @@ import { handleRunCli } from "./runner.js";
 
 const arg = process.argv[2];
 
+if (arg === "-i" || arg === "--interactive" || arg === "interactive" || (arg === undefined && process.stdout.isTTY && !process.env.SECRETVAULT_MASTER_KEY)) {
+  const { handleInteractiveMenu } = await import("./cli/interactive.js");
+  await handleInteractiveMenu();
+  process.exit(0);
+}
+
 if (arg === "run") {
   await handleRunCli();
   process.exit(0);
