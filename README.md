@@ -125,11 +125,16 @@ secretvault secret delete
 
 ## Documentation Index
 
-- 🚀 **[Self-Host & Installation Guide](docs/install.md)** — Step-by-step AFFiNE-style Docker Compose deployment guide.
-- 💻 **[Usage & Developer Integration Guide](docs/usage.md)** — Connecting Claude Code / Desktop MCP, using `@secretvault/client` and `@secretvault/admin`, and setting up Service Profiles.
+- 📖 **[Central Usage Index](docs/usage.md)** — Master documentation overview and navigation index.
+- 🖥️ **[CLI & Terminal Manager Guide](docs/cli.md)** — Interactive manager (`secretvault` / `securevault`), `secretvault update`, stdio runner, and local credentials.
+- 🌐 **[Web UI & Admin Portal](docs/webui.md)** — Web dashboard (`/ui`), Service Profiles, Passkey & TOTP step-up authentication, access logs.
+- ⚡ **[MCP & Developer Tools Guide](docs/mcp.md)** — Integration guide for Antigravity IDE, Claude Code, Claude Desktop, OpenCode, Codex, Cursor.
+- 📦 **[SDKs & Client Libraries](docs/sdk.md)** — Integration via `@secretvault/client`, `@secretvault/admin`, Python & Bash scripts.
+- 🛠️ **[Server Operations & Hosting Guide](docs/server.md)** — Docker Compose, environment variables, health checks, master key rotation.
+- 🚀 **[Self-Host & Installation Guide](docs/install.md)** — Step-by-step production deployment guide.
 - 📜 **[Versioned HTTP Contract](docs/openapi.json)** — OpenAPI 3.1 management/metadata schema and proxy contract surface.
-- 🛡️ **[Security Architecture & Threat Model](docs/security.md)** — AES-256-GCM cipher details, Docker Secrets RAM-mount, and Passkey/TOTP step-up auth.
-- 🔧 **[Operations & Troubleshooting](docs/ops.md)** — Database backups (`pg_dump`), disaster recovery, container upgrades, and break-glass CLI tools.
+- 🛡️ **[Security Architecture & Threat Model](docs/security.md)** — AES-256-GCM cipher details, memory isolation, Passkey/TOTP step-up auth.
+- 🔧 **[Operations & Troubleshooting](docs/ops.md)** — Database backups (`pg_dump`), disaster recovery, break-glass recovery tools.
 
 ---
 
