@@ -259,6 +259,8 @@ export async function writeSafeTomlConfig(
 }
 
 
+import { saveClientCredentials, loadClientCredentials } from "./credentialStore.js";
+
 export async function handleSetupCli(): Promise<void> {
   console.log("\x1b[1;36m");
   console.log("════════════════════════════════════════════════════════════════════════");
@@ -269,7 +271,8 @@ export async function handleSetupCli(): Promise<void> {
   const rl = readline.createInterface({ input, output });
 
   try {
-    const serverUrl = await promptInput(rl, "SecretVault Server URL", "http://localhost:3004");
+    const stored = loadClientCredentials();
+    const serverUrl = await promptInput(rl, "SecretVault Server URL", stored?.url || "http://localhost:3004");
 
     // SV-020: warn when the operator points this tool at a non-loopback
     // plaintext URL — passwords and the new client key would traverse the
@@ -285,7 +288,7 @@ export async function handleSetupCli(): Promise<void> {
     } catch {
       // invalid URL — the fetch below will surface a clearer error
     }
-    let clientKey = await promptInput(rl, "SecretVault Client Key (sv_...) [Leave blank to log in]", "");
+    let clientKey = await promptInput(rl, "SecretVault Client Key (sv_...) [Leave blank to log in]", stored?.clientKey || "");
 
     if (!clientKey) {
       console.log("\n\x1b[1;33mNo Client Key provided. Logging in to generate a new key...\x1b[0m");
@@ -351,6 +354,10 @@ export async function handleSetupCli(): Promise<void> {
       console.log("\x1b[1;32m✓ Provisioned new Client Key successfully!\x1b[0m");
       console.log(`\x1b[1mClient Key:\x1b[0m ${clientKey.substring(0, 8)}...\n`);
     }
+
+    // Save client credentials to ~/.secretvault/credential.json (mode 0600)
+    saveClientCredentials(serverUrl, clientKey);
+    console.log("\x1b[1;32m✓ Persisted local credentials to ~/.secretvault/credential.json (mode 0600)\x1b[0m\n");
 
     // Diagnostic health check with client key
     console.log("\x1b[36mTesting server health check...\x1b[0m");

@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 
+import { loadClientCredentials } from "./cli/credentialStore.js";
+
 /**
  * SV-AUD-007: decide the child's environment and argv given a resolved secret.
  *
@@ -40,8 +42,10 @@ export async function handleRunCli(): Promise<void> {
 
   let secretName = "";
   let allowArgSubstitution = false;
-  const vaultUrl = process.env.SECRETVAULT_URL || "http://localhost:3004";
-  const clientKey = process.env.SECRETVAULT_CLIENT_KEY || "";
+
+  const stored = loadClientCredentials();
+  const vaultUrl = process.env.SECRETVAULT_URL || stored?.url || "http://localhost:3004";
+  const clientKey = process.env.SECRETVAULT_CLIENT_KEY || stored?.clientKey || "";
 
   const separatorIdx = args.indexOf("--");
   const optionsArgs = separatorIdx !== -1 ? args.slice(0, separatorIdx) : args;
@@ -62,7 +66,7 @@ export async function handleRunCli(): Promise<void> {
   }
 
   if (!clientKey) {
-    console.error("[secretvault] Error: SECRETVAULT_CLIENT_KEY env var is required");
+    console.error("[secretvault] Error: SECRETVAULT_CLIENT_KEY environment variable or stored credential is required");
     process.exit(1);
   }
 

@@ -55,8 +55,21 @@ export async function promptPassword(rl: readline.Interface, question: string): 
   return answer.trim();
 }
 
+import { loadClientCredentials } from "./credentialStore.js";
+
+function printSecretUsage() {
+  console.log("SecretVault Terminal Secret Manager");
+  console.log("Usage: secretvault-mcp [list|create|rotate|delete] [--url <url>] [--key <key>]");
+}
+
 export async function handleSecretCli(): Promise<void> {
-  const args = process.argv.slice(3);
+  const args = process.argv.slice(2);
+
+  if (args.includes("--help") || args.includes("-h") || args[0] === "help") {
+    printSecretUsage();
+    return;
+  }
+
   const subcommand = args[0] || "list";
 
   const urlIdx = args.indexOf("--url");
@@ -80,12 +93,13 @@ export async function handleSecretCli(): Promise<void> {
     process.exit(1);
   }
 
-  const serverUrl = (urlIdx !== -1 && args[urlIdx + 1]) || process.env.SECRETVAULT_URL || "http://localhost:3004";
-  const clientKey = (keyIdx !== -1 && args[keyIdx + 1]) || process.env.SECRETVAULT_CLIENT_KEY || process.env.SECRETVAULT_TOKEN || "";
+  const stored = loadClientCredentials();
+  const serverUrl = (urlIdx !== -1 && args[urlIdx + 1]) || process.env.SECRETVAULT_URL || stored?.url || "http://localhost:3004";
+  const clientKey = (keyIdx !== -1 && args[keyIdx + 1]) || process.env.SECRETVAULT_CLIENT_KEY || process.env.SECRETVAULT_TOKEN || stored?.clientKey || "";
 
   if (!clientKey && subcommand !== "help") {
     console.error("\x1b[1;31mError: Missing SecretVault Client Key or Token.\x1b[0m");
-    console.error("Set the SECRETVAULT_CLIENT_KEY environment variable (preferred).");
+    console.error("Set SECRETVAULT_CLIENT_KEY or run 'secretvault setup' to save local credentials.");
     process.exit(1);
   }
 
