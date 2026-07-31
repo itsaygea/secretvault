@@ -4,6 +4,7 @@ import { loadClientCredentials } from "./credentialStore.js";
 import { promptPassword } from "./secret.js";
 import { handleSetupCli } from "./setup.js";
 import { handleRunCli } from "../runner.js";
+import { handleUpdateCli } from "./update.js";
 
 async function promptInput(rl: readline.Interface, question: string, defaultValue?: string): Promise<string> {
   const displayPrompt = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `;
@@ -202,6 +203,7 @@ export async function handleInteractiveMenu(): Promise<void> {
       console.log("\x1b[1;36m════════════════════════════════════════════════════════════════════════\x1b[0m");
       console.log(`Connected Server: \x1b[32m${serverUrl}\x1b[0m`);
       console.log(`Client Key:       \x1b[32m${clientKey.substring(0, 8)}...\x1b[0m\n`);
+
       console.log("Select an action:");
       console.log("  [1] 📋 List Secrets");
       console.log("  [2] 🔑 Create New Secret");
@@ -209,9 +211,10 @@ export async function handleInteractiveMenu(): Promise<void> {
       console.log("  [4] ❌ Delete Secret");
       console.log("  [5] 🚀 Run Stdio Command (Zero-Leak)");
       console.log("  [6] ⚙️ Re-run Setup Wizard");
-      console.log("  [7] 🚪 Exit\n");
+      console.log("  [7] ⬆️ Update SecretVault CLI");
+      console.log("  [8] 🚪 Exit\n");
 
-      const choice = await promptInput(rl, "Enter choice [1-7]", "1");
+      const choice = await promptInput(rl, "Enter choice [1-8]", "1");
 
       switch (choice.trim()) {
         case "1":
@@ -242,12 +245,16 @@ export async function handleInteractiveMenu(): Promise<void> {
           await handleSetupCli();
           return;
         case "7":
+          rl.close();
+          await handleUpdateCli();
+          return;
+        case "8":
         case "q":
         case "exit":
           console.log("\x1b[32mGoodbye!\x1b[0m");
           return;
         default:
-          console.log("\x1b[33mInvalid selection. Please enter a number between 1 and 7.\x1b[0m\n");
+          console.log("\x1b[33mInvalid selection. Please enter a number between 1 and 8.\x1b[0m\n");
       }
     }
   } finally {

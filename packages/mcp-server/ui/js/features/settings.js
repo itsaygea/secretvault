@@ -71,11 +71,7 @@ export function buildDocsSnippets() {
               "npx",
               "-y",
               "@example/mcp-server"
-            ],
-            "env": {
-              "SECRETVAULT_URL": hostUrl,
-              "SECRETVAULT_CLIENT_KEY": keyVal
-            }
+            ]
           }
         }
       },
@@ -98,13 +94,12 @@ export function buildDocsSnippets() {
       2
     ),
     "snippet-curl": [
-      `# 1. Egress Proxy:`,
+      `# 1. Reverse Proxy:`,
       `curl -s -H "Authorization: Bearer ${keyVal}" \\`,
       `  "${hostUrl}/proxy/example-service/api/v1/resource"`,
       "",
-      `# 2. CLI Runner:`,
-      `SECRETVAULT_URL="${hostUrl}" SECRETVAULT_CLIENT_KEY="${keyVal}" \\`,
-      `  secretvault-mcp run --secret EXAMPLE_API_KEY -- my-command`,
+      `# 2. Zero-Leak CLI Runner (uses ~/.secretvault/credential.json):`,
+      `secretvault run --secret EXAMPLE_API_KEY -- my-command`,
     ].join("\n"),
   };
 }

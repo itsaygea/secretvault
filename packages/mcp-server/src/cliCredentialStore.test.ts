@@ -6,8 +6,10 @@ import { saveClientCredentials, loadClientCredentials, getCredentialPath, getSec
 
 describe("CLI Credential Store (SV-AUD-007 / SV-AUD-012)", () => {
   const credentialFile = getCredentialPath();
+  const legacyFile = path.join(getSecretVaultDir(), "mcp-credential.key");
   const vaultDir = getSecretVaultDir();
   let backupContent: string | null = null;
+  let legacyBackupContent: string | null = null;
 
   beforeEach(() => {
     if (fs.existsSync(credentialFile)) {
@@ -15,6 +17,13 @@ describe("CLI Credential Store (SV-AUD-007 / SV-AUD-012)", () => {
       fs.unlinkSync(credentialFile);
     } else {
       backupContent = null;
+    }
+
+    if (fs.existsSync(legacyFile)) {
+      legacyBackupContent = fs.readFileSync(legacyFile, "utf8");
+      fs.unlinkSync(legacyFile);
+    } else {
+      legacyBackupContent = null;
     }
   });
 
@@ -26,6 +35,15 @@ describe("CLI Credential Store (SV-AUD-007 / SV-AUD-012)", () => {
       fs.writeFileSync(credentialFile, backupContent, { mode: 0o600 });
     } else if (fs.existsSync(credentialFile)) {
       fs.unlinkSync(credentialFile);
+    }
+
+    if (legacyBackupContent !== null) {
+      if (!fs.existsSync(vaultDir)) {
+        fs.mkdirSync(vaultDir, { recursive: true, mode: 0o700 });
+      }
+      fs.writeFileSync(legacyFile, legacyBackupContent, { mode: 0o600 });
+    } else if (fs.existsSync(legacyFile)) {
+      fs.unlinkSync(legacyFile);
     }
   });
 

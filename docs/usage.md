@@ -198,7 +198,7 @@ For remote HTTP/SSE MCP servers (e.g., `https://api.example.com/mcp/tool` requir
 
 For third-party stdio MCP servers running locally via CLI (e.g., `@example/mcp-server`):
 
-The CLI runner fetches the requested secret directly from SecretVault into system RAM when the process boots, injecting it into `process.env` without writing plaintext secrets to disk:
+`secretvault setup` (or `install-client.sh`) saves your local server URL and client key to `~/.secretvault/credential.json` (`0600` POSIX permissions). The CLI runner automatically uses these credentials without requiring environment variables or secrets in your `mcp_config.json`:
 
 ```json
 "example-stdio-mcp": {
@@ -208,18 +208,40 @@ The CLI runner fetches the requested secret directly from SecretVault into syste
     "--secret", "EXAMPLE_API_KEY",
     "--",
     "npx", "-y", "@example/mcp-server"
-  ],
-  "env": {
-    "SECRETVAULT_URL": "https://vault.example.com",
-    "SECRETVAULT_CLIENT_KEY": "sv_YOUR_LINKING_KEY"
-  }
+  ]
 }
 ```
 
 ### Security Guarantees
-- 🔒 **Zero Plaintext Secrets on Disk**: Config files stored on disk contain only `SECRETVAULT_CLIENT_KEY` (`sv_...`).
-- 🧠 **RAM-Only Secret Lifecycle**: Decrypted secrets reside exclusively in process RAM during execution.
+- 🔒 **Zero Plaintext Secrets on Disk**: Config files stored on disk contain zero raw secret values or keys.
+- 🧠 **RAM-Only Secret Lifecycle**: Decrypted secrets reside exclusively in child process RAM during execution.
 - 🛡️ **No Arg Leakage**: Secrets are injected via environment variables (`process.env`), preventing exposure in `ps` or `/proc/<pid>/cmdline`.
+
+---
+
+## 5. Interactive Terminal Manager (`secretvault` / `secretvault -i`)
+
+Running `secretvault` (or `secretvault -i`) in a terminal opens the interactive management menu:
+
+```
+════════════════════════════════════════════════════════════════════════
+       ⚡ SecretVault Terminal Manager (Interactive Mode)
+════════════════════════════════════════════════════════════════════════
+Connected Server: https://vault.example.com
+Client Key:       sv_YOUR_LINKING_KEY...
+
+Select an action:
+  [1] 📋 List Secrets
+  [2] 🔑 Create New Secret
+  [3] 🔄 Rotate Existing Secret
+  [4] ❌ Delete Secret
+  [5] 🚀 Run Stdio Command (Zero-Leak)
+  [6] ⚙️ Re-run Setup Wizard
+  [7] 🚪 Exit
+```
+
+- **Masked Input**: Creating or rotating secrets masks your terminal typing so passwords and API keys never echo on screen or leak into `history`.
+- **Automatic Case Insensitivity**: Secret Vault treats all names case-insensitively (`canonicalName()`), preventing duplicate entries (`EXAMPLE_API_KEY` vs `example_api_key`).
 
 ---
 

@@ -20,6 +20,12 @@ if (arg === "setup") {
   process.exit(0);
 }
 
+if (arg === "update" || arg === "upgrade") {
+  const { handleUpdateCli } = await import("./cli/update.js");
+  await handleUpdateCli();
+  process.exit(0);
+}
+
 if (arg === "secret") {
   const { handleSecretCli } = await import("./cli/secret.js");
   await handleSecretCli();

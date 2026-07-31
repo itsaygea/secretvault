@@ -272,7 +272,24 @@ export async function handleSetupCli(): Promise<void> {
 
   try {
     const stored = loadClientCredentials();
-    const serverUrl = await promptInput(rl, "SecretVault Server URL", stored?.url || "http://localhost:3004");
+    let serverUrl = "";
+    let clientKey = "";
+
+    if (stored && stored.url && stored.clientKey) {
+      console.log(`\x1b[1;32m✓ Found existing SecretVault credentials:\x1b[0m`);
+      console.log(`  Server URL: \x1b[36m${stored.url}\x1b[0m`);
+      console.log(`  Client Key: \x1b[36m${stored.clientKey.substring(0, 8)}...\x1b[0m\n`);
+
+      const keep = await promptInput(rl, "Keep existing credentials and re-configure tools? (Y/n)", "y");
+      if (keep.toLowerCase() === "y" || keep.toLowerCase() === "yes") {
+        serverUrl = stored.url;
+        clientKey = stored.clientKey;
+      }
+    }
+
+    if (!serverUrl) {
+      serverUrl = await promptInput(rl, "SecretVault Server URL", stored?.url || "http://localhost:3004");
+    }
 
     // SV-020: warn when the operator points this tool at a non-loopback
     // plaintext URL — passwords and the new client key would traverse the
@@ -288,7 +305,10 @@ export async function handleSetupCli(): Promise<void> {
     } catch {
       // invalid URL — the fetch below will surface a clearer error
     }
-    let clientKey = await promptInput(rl, "SecretVault Client Key (sv_...) [Leave blank to log in]", stored?.clientKey || "");
+
+    if (!clientKey) {
+      clientKey = await promptInput(rl, "SecretVault Client Key (sv_...) [Leave blank to log in]", stored?.clientKey || "");
+    }
 
     if (!clientKey) {
       console.log("\n\x1b[1;33mNo Client Key provided. Logging in to generate a new key...\x1b[0m");
