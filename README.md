@@ -107,6 +107,7 @@ secretvault
 
 # Auto-update CLI binaries to latest version
 secretvault update
+# (or typing securevault update)
 
 # Setup developer tool integrations
 secretvault setup

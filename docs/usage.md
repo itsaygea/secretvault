@@ -237,11 +237,24 @@ Select an action:
   [4] ❌ Delete Secret
   [5] 🚀 Run Stdio Command (Zero-Leak)
   [6] ⚙️ Re-run Setup Wizard
-  [7] 🚪 Exit
+  [7] ⬆️ Update SecretVault CLI
+  [8] 🚪 Exit
 ```
 
+- **Interactive Manager Aliases**: Launchable via `secretvault` or `securevault` (or `-i` / `--interactive`).
 - **Masked Input**: Creating or rotating secrets masks your terminal typing so passwords and API keys never echo on screen or leak into `history`.
 - **Automatic Case Insensitivity**: Secret Vault treats all names case-insensitively (`canonicalName()`), preventing duplicate entries (`EXAMPLE_API_KEY` vs `example_api_key`).
+
+### CLI Auto-Updates (`secretvault update` / `securevault update`)
+
+To update your local CLI binaries to the latest release at any time:
+
+```bash
+secretvault update
+# (or securevault update)
+```
+
+The auto-updater fetches the latest release, builds and updates global CLI executables, and automatically preserves your stored credentials (`~/.secretvault/credential.json`) and developer tool configurations.
 
 ---
 
