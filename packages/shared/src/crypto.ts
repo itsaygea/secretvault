@@ -186,17 +186,31 @@ export async function decryptSecret(
     const purpose = options?.purpose ?? ENCRYPTION_PURPOSE.SECRET;
     const dek = deriveDEK(masterKey, iv, purpose);
 
-    const decipher = createDecipheriv("aes-256-gcm", dek, iv);
-    decipher.setAuthTag(tag);
-    if (options?.aad) {
-      decipher.setAAD(Buffer.from(options.aad, "utf8"));
+    try {
+      const decipher = createDecipheriv("aes-256-gcm", dek, iv);
+      decipher.setAuthTag(tag);
+      if (options?.aad) {
+        decipher.setAAD(Buffer.from(options.aad, "utf8"));
+      }
+      const decrypted = Buffer.concat([
+        decipher.update(ct),
+        decipher.final(),
+      ]);
+      return decrypted.toString("utf8");
+    } catch (err) {
+      if (options?.aad) {
+        // v1 blobs created before v2 context-bound AAD did not specify AAD.
+        // Fall back to decrypting without AAD for legacy v1 blobs.
+        const decipherFallback = createDecipheriv("aes-256-gcm", dek, iv);
+        decipherFallback.setAuthTag(tag);
+        const decrypted = Buffer.concat([
+          decipherFallback.update(ct),
+          decipherFallback.final(),
+        ]);
+        return decrypted.toString("utf8");
+      }
+      throw err;
     }
-
-    const decrypted = Buffer.concat([
-      decipher.update(ct),
-      decipher.final(),
-    ]);
-    return decrypted.toString("utf8");
   }
 
   // Legacy format: iv:ct:tag (3 parts) — pre-versioning blobs.

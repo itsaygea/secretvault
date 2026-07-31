@@ -116,12 +116,23 @@ export async function handleRunCli(): Promise<void> {
     // Legacy argument substitution is opt-in only.
     const { env, argv } = buildChildSpawn(secretName, secretValue, cmdArgs, allowArgSubstitution);
 
-    const child = spawn(argv[0], argv.slice(1), {
-      stdio: "inherit",
-      env,
-    });
+    await new Promise<void>((resolve) => {
+      const child = spawn(argv[0], argv.slice(1), {
+        stdio: "inherit",
+        env,
+      });
 
-    child.on("exit", (code) => process.exit(code ?? 0));
+      child.on("exit", (code) => {
+        process.exitCode = code ?? 0;
+        resolve();
+      });
+
+      child.on("error", (err) => {
+        console.error(`[secretvault] Child process error: ${err.message}`);
+        process.exitCode = 1;
+        resolve();
+      });
+    });
   } catch (err: any) {
     // Value-free error: never echo the secret.
     console.error(`[secretvault] Failed to resolve secret '${secretName}'.`);
