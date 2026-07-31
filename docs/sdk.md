@@ -70,7 +70,7 @@ client_key = creds["clientKey"]
 
 # Issue request through SecretVault reverse proxy
 req = urllib.request.Request(
-    f"{vault_url}/proxy/zai/api/monitor/usage/quota/limit",
+    f"{vault_url}/proxy/example_service/v1/resource",
     headers={"Authorization": f"Bearer {client_key}"}
 )
 with urllib.request.urlopen(req) as resp:
@@ -83,5 +83,5 @@ with urllib.request.urlopen(req) as resp:
 KEY=$(jq -r .clientKey ~/.secretvault/credential.json)
 URL=$(jq -r .url ~/.secretvault/credential.json)
 
-curl -s -H "Authorization: Bearer $KEY" "$URL/proxy/zai/api/monitor/usage/quota/limit"
+curl -s -H "Authorization: Bearer $KEY" "$URL/proxy/example_service/v1/resource"
 ```

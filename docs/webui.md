@@ -28,7 +28,19 @@ Service Profiles map proxy routes (`/proxy/<service_name>/*`) to upstream target
    - **Secret Name**: `OPENAI_API_KEY`.
 4. Click **Save Profile**.
 
-Client applications can now issue requests to SecretVault's proxy using their linking key (`sv_...`), and SecretVault will inject the real `OPENAI_API_KEY` server-side before relaying to `api.openai.com`.
+### Proxy URL Route Mapping
+
+```text
+Service Profile Name:    example_service
+Target Base URL:         https://api.example.com
+
+Client Proxy Request:    https://vault.example.com/proxy/example_service/v1/resource
+      │
+      ▼ (SecretVault authenticates sv_... key & injects decrypted secret)
+Upstream Request:        https://api.example.com/v1/resource
+```
+
+Client applications can issue requests to SecretVault's proxy (`/proxy/example_service/v1/resource`), and SecretVault strips client auth, decrypts the secret, and relays the request to `https://api.example.com/v1/resource` with the real credentials injected server-side.
 
 ---
 
