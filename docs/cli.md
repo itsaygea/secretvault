@@ -80,7 +80,7 @@ secretvault run --secret OPENAI_API_KEY -- npx -y @example/mcp-server
 ```json
 {
   "url": "https://vault.example.com",
-  "clientKey": "sv_60d92e8f..."
+  "clientKey": "sv_1234567890abcdef..."
 }
 ```
 
@@ -89,7 +89,7 @@ secretvault run --secret OPENAI_API_KEY -- npx -y @example/mcp-server
   ```text
   ✓ Found existing SecretVault credentials:
     Server URL: https://vault.example.com
-    Client Key: sv_60d92e8f...
+    Client Key: sv_1234567890abcdef...
 
   Keep existing credentials and re-configure tools? (Y/n) [y]:
   ```
