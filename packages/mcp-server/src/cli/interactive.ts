@@ -37,15 +37,12 @@ async function listSecretsInteractive(serverUrl: string, clientKey: string): Pro
     return;
   }
 
-  console.log("\x1b[1mNAME                           DISPLAY NAME                   ENVIRONMENT     MASKED VALUE          TAGS\x1b[0m");
-  console.log("------------------------------------------------------------------------------------------------------------------");
+  console.log("\x1b[1mSECRET NAME                                        MASKED VALUE\x1b[0m");
+  console.log("-------------------------------------------------------------------------------");
   secrets.forEach((s: any) => {
-    const nameVal = (s.name || s.canonical_name || "UNKNOWN").padEnd(30);
-    const displayVal = (s.display_name || s.name || "").padEnd(30);
-    const envVal = (s.environment || "global").padEnd(15);
-    const maskedVal = (s.masked_value || s.masked_preview || "••••••••").padEnd(20);
-    const tagsVal = Array.isArray(s.tags) ? s.tags.join(", ") : "";
-    console.log(`${nameVal} ${displayVal} ${envVal} ${maskedVal} ${tagsVal}`);
+    const nameVal = (s.display_name || s.name || s.canonical_name || "UNKNOWN").padEnd(50);
+    const maskedVal = s.masked_value || s.masked_preview || "••••••••";
+    console.log(`${nameVal} ${maskedVal}`);
   });
   console.log("");
 }
