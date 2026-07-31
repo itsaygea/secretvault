@@ -30,7 +30,7 @@ async function listSecretsInteractive(serverUrl: string, clientKey: string): Pro
   }
 
   const rawData = (await res.json().catch(() => [])) as any;
-  const secrets = Array.isArray(rawData) ? rawData : rawData?.secrets || [];
+  const secrets = Array.isArray(rawData) ? rawData : rawData?.data || rawData?.secrets || [];
 
   if (secrets.length === 0) {
     console.log("\x1b[33mNo secrets found for this client key.\x1b[0m\n");
@@ -43,7 +43,7 @@ async function listSecretsInteractive(serverUrl: string, clientKey: string): Pro
     const nameVal = (s.name || s.canonical_name || "UNKNOWN").padEnd(30);
     const displayVal = (s.display_name || s.name || "").padEnd(30);
     const envVal = (s.environment || "global").padEnd(15);
-    const maskedVal = (s.masked_value || "••••••••").padEnd(20);
+    const maskedVal = (s.masked_value || s.masked_preview || "••••••••").padEnd(20);
     const tagsVal = Array.isArray(s.tags) ? s.tags.join(", ") : "";
     console.log(`${nameVal} ${displayVal} ${envVal} ${maskedVal} ${tagsVal}`);
   });
