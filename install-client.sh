@@ -127,8 +127,8 @@ main() {
   echo -e "${CYAN}Building packages...${RESET}"
   npm run build &>/dev/null
 
-  echo -e "${CYAN}Installing SecretVault CLI binaries (secretvault, secretvault-cli, secretvault-mcp)...${RESET}"
-  rm -f "$HOME/.local/bin/secretvault" "$HOME/.local/bin/secretvault-cli" "$HOME/.local/bin/secretvault-mcp" &>/dev/null || true
+  echo -e "${CYAN}Installing SecretVault CLI binaries (secretvault, secretvault-cli, secretvault-mcp, securevault)...${RESET}"
+  rm -f "$HOME/.local/bin/secretvault" "$HOME/.local/bin/secretvault-cli" "$HOME/.local/bin/secretvault-mcp" "$HOME/.local/bin/securevault" "$HOME/.local/bin/securevault-cli" &>/dev/null || true
   # SV-AUD-012: install is fail-closed — a failed CLI install must surface, not be swallowed.
   npm install -g ./packages/mcp-server --force &>/dev/null || npm install -g ./packages/mcp-server --prefix="$HOME/.local" --force &>/dev/null
 
@@ -138,10 +138,12 @@ main() {
     ln -sf "$(realpath "$NODE_BIN_DIR/secretvault")" "$HOME/.local/bin/secretvault" 2>/dev/null || true
     ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-cli")" "$HOME/.local/bin/secretvault-cli" 2>/dev/null || true
     ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-mcp")" "$HOME/.local/bin/secretvault-mcp" 2>/dev/null || true
+    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault")" "$HOME/.local/bin/securevault" 2>/dev/null || true
+    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-cli")" "$HOME/.local/bin/securevault-cli" 2>/dev/null || true
   fi
 
   if command -v secretvault &>/dev/null || [ -x "$HOME/.local/bin/secretvault" ]; then
-    echo -e "${GREEN}✓ SecretVault CLI binaries ('secretvault', 'secretvault-cli', 'secretvault-mcp') installed to PATH.${RESET}\n"
+    echo -e "${GREEN}✓ SecretVault CLI binaries ('secretvault', 'securevault') installed to PATH.${RESET}\n"
   fi
 
   echo -e "${GREEN}✓ Environment ready. Launching setup...${RESET}\n"
