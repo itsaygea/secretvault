@@ -103,10 +103,23 @@ async function main() {
     query: { name: `eq.${SECRET_B}` },
     body: { masked_preview: "hax" },
   });
-  if (crossUpdate.status >= 400 || (crossUpdate.status === 200 && Array.isArray(crossUpdate.json) && crossUpdate.json.length === 0)) {
-    ok("User A cannot update User B's secret");
+  // PostgREST reports 204 even when RLS matched zero rows, so — exactly like
+  // the DELETE check below — the proof is that B's row is unchanged afterward,
+  // not the PATCH status code.
+  const bAfterUpdate = await request("/rest/v1/secrets", tokenB, {
+    query: { name: `eq.${SECRET_B}`, select: "masked_preview" },
+  });
+  const rowUntouched =
+    bAfterUpdate.status === 200 && Array.isArray(bAfterUpdate.json) &&
+    bAfterUpdate.json.length === 1 && bAfterUpdate.json[0].masked_preview !== "hax";
+  const statusAcceptable =
+    crossUpdate.status >= 400 ||
+    crossUpdate.status === 204 ||
+    (crossUpdate.status === 200 && Array.isArray(crossUpdate.json) && crossUpdate.json.length === 0);
+  if (statusAcceptable && rowUntouched) {
+    ok("User A cannot update User B's secret (B's row untouched)");
   } else {
-    fail(`Cross-tenant UPDATE succeeded (${crossUpdate.status}): ${crossUpdate.body}`);
+    fail(`Cross-tenant UPDATE mutated B's row (PATCH ${crossUpdate.status}; re-read: ${bAfterUpdate.status} ${bAfterUpdate.body})`);
   }
 
   // 5. User A cannot DELETE User B's secret.
