@@ -64,6 +64,10 @@ jobs:
           exit-code: "1"
           ignore-unfixed: true
           severity: CRITICAL,HIGH
+          # trivy-action v0.36 unsets TRIVY_SEVERITY for SARIF output unless
+          # this is set, silently turning the HIGH/CRITICAL gate into an
+          # any-finding gate (medium/low CVEs fail the job).
+          limit-severities-for-sarif: true
 
       # 2. IaC / misconfiguration across repo config.
       - name: Scan configuration / IaC (gate on HIGH/CRITICAL)
@@ -77,6 +81,8 @@ jobs:
           output: reports/config.sarif
           exit-code: "1"
           severity: CRITICAL,HIGH
+          # Same as above: keep the severity filter applied to the SARIF gate.
+          limit-severities-for-sarif: true
 
       # 3. Hard-coded secrets. Never gated off — a hit must always fail.
       - name: Scan for leaked secrets (gate on any finding)
