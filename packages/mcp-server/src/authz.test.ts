@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 import { hasScope, hasRunnerScope, validateLinkingKeyScopes, type Principal } from "./authz.js";
 
 const linkingPrincipal: Principal = {

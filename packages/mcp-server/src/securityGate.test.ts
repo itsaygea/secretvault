@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 
 /**
  * Security-gate contract tests (SV-026 / SV-056).
@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
  *
  * The repo root is two levels above this package's src directory.
  */
-const repoRoot = resolve(__dirname, "..", "..", "..");
+const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 const workflowsDir = join(repoRoot, ".github", "workflows");
 
 function runNode(script: string): string {

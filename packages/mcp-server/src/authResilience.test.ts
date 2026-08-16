@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { RateLimiter, MemoryRateLimitStore, type Clock } from "./rateLimit.js";
 import { encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import { handleTotpAuthenticate, initStepUpAuth } from "./stepup.js";

@@ -1,7 +1,9 @@
 import { createServer, type Server } from "node:http";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "@secretvault/testing";
 import { authenticator } from "otplib";
 import { encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 
 process.env.NODE_ENV = "test";
 process.env.SECRETVAULT_SUPABASE_URL = "http://supabase.test";

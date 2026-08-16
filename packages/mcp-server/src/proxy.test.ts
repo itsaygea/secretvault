@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach } from "@secretvault/testing";
 import { PassThrough } from "node:stream";
 import http from "node:http";
 import crypto from "node:crypto";

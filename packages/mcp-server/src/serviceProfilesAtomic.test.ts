@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "@secretvault/testing";
 import { handleCreateProfile } from "./serviceProfiles.js";
 
 /**

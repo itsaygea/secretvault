@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi } from "@secretvault/testing";
 import { resolveMcpAuth } from "./mcpAuth.js";
 import { type IncomingMessage } from "node:http";
 

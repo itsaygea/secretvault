@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 
 /**
  * CI infrastructure contract tests (SV-029).
@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
  * every table, the service-role JWT in ci/secretvault.env matches the minter,
  * and the CI compose references PostgREST (not the removed mock).
  */
-const repoRoot = resolve(__dirname, "..", "..", "..");
+const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 const migrationsDir = join(repoRoot, "supabase", "migrations");
 
 function runNode(script: string, args: string[] = []): string {

@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "@secretvault/testing";
 import { databaseSsl, DATABASE_SSL_INSECURE_CONFIRM, loadMigrations, migrationChecksum, sortMigrationNames } from "./migrate.js";
 
 describe("startup migration helpers", () => {

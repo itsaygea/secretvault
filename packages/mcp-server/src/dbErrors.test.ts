@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 import { classify, internalError, isNotFound, publicDbCode, safeErrorMessage } from "./dbErrors.js";
 
 describe("dbErrors classification (SV-047 / SV-AUD-014)", () => {

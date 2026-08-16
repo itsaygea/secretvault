@@ -41,7 +41,7 @@ jobs:
         run: npm run check:openapi-drift
 
       - name: Run tests
-        run: npm test -- --run
+        run: npm test
 
       - name: Lint GitHub Actions workflows (immutable action pins)
         run: node scripts/check-workflow-pins.mjs

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 
-const root = resolve(__dirname, "..", "..", "..");
+const root = resolve(import.meta.dirname, "..", "..", "..");
 const server = readFileSync(resolve(root, "install-server.sh"), "utf8");
 const client = readFileSync(resolve(root, "install-client.sh"), "utf8");
 

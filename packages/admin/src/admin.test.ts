@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "@secretvault/testing";
 import { SecretVaultAdmin } from "./index.js";
 
 const key = "sv_testkey12345678901234567890123456789012345678901234";

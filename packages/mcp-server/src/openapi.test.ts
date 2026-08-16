@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 import expectedManagementPaths from "../../../scripts/openapi-paths.json";
 
 const openApi = JSON.parse(readFileSync(resolve(process.cwd(), "docs/openapi.json"), "utf8")) as {

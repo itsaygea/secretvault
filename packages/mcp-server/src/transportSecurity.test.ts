@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "@secretvault/testing";
 import {
   ALLOW_PLAINTEXT_EXTERNAL_CONFIRM,
   applySecurityHeaders,

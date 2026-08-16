@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { randomBytes } from "node:crypto";
 import {
   encryptSecret,

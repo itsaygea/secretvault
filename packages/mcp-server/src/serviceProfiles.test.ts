@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "@secretvault/testing";
 import { handleCreateProfile } from "./serviceProfiles.js";
 
 describe("service-profile egress admission", () => {

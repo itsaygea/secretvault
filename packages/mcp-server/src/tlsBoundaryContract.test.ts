@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "@secretvault/testing";
 
 /**
  * SV-AUD-001 — fail-closed TLS boundary contract tests.
@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
  * tests are the hard gate; these are defence-in-depth for the topology.
  */
 
-const repoRoot = resolve(__dirname, "..", "..", "..");
+const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 const envFilePath = resolve(repoRoot, ".env");
 
 function dockerAvailable(): boolean {

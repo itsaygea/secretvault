@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { handleCreateSecret, handleRotateSecret, handleDeleteSecret, handleRevealSecret } from "./api.js";
 import { handleDeleteUser } from "./users.js";
 

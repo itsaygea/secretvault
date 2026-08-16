@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import net from "node:net";
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from "node:http";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "@secretvault/testing";
 import { encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 
 process.env.NODE_ENV = "test";

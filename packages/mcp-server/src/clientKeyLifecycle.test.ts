@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 import { generateStepUpToken, verifyStepUpToken, verifyStepUpTokenForResource, initStepUpAuth } from "./stepup.js";
 import { handleRegenerateClientKey, handleRevealClientKey } from "./users.js";
 

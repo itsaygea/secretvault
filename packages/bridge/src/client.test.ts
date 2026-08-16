@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { SecretBridge } from "./index.js";
 
 describe("Client Security Invariants & Bridge API", () => {

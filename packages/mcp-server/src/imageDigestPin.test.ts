@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 
-const root = resolve(__dirname, "..", "..", "..");
+const root = resolve(import.meta.dirname, "..", "..", "..");
 
 // SV-AUD-012: every external base image must be pinned to an immutable digest,
 // not a mutable tag. A tag can be retagged; a digest pins exact bytes.

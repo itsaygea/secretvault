@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 import { encryptSecret, decryptSecret, deriveDEK, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import { resolveMasterKey } from "./keyLoader.js";
 import { writeFileSync, unlinkSync, chmodSync } from "node:fs";

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -17,9 +17,8 @@ import { dirname, resolve } from "node:path";
  * actually generates, so user-facing copy can't diverge from runtime again.
  */
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const UI_DIR = resolve(__dirname, "..", "ui");
-const SRC_DIR = resolve(__dirname);
+const UI_DIR = resolve(import.meta.dirname, "..", "ui");
+const SRC_DIR = resolve(import.meta.dirname);
 
 function readUiSources(): string {
   const files: string[] = [];

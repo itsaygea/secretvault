@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "@secretvault/testing";
 import { clampPageSize, decodeCursor, decodeBeforeCursor, encodeCursor, encodeBeforeCursor, escapePostgrestValue, initCursorKey, paginateQuery } from "./pagination.js";
 import { registerListSecrets } from "./tools/listSecrets.js";
 import { registerSearchSecrets } from "./tools/searchSecrets.js";

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 // The UI ships as plain ESM JavaScript that is copied verbatim into dist/ — it
 // is never compiled by tsc, so it has no type declarations. The DOM-free pure
 // helpers underpinning accessible navigation (SV-060) and the dialog focus trap

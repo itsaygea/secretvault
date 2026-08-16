@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 
 /**
  * SV-058: the installer must not advertise "empty for all" for the egress
@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
  * and confirm the resulting boundary before writing the config.
  */
 describe("SV-058 installer egress prompt", () => {
-  const installer = readFileSync(resolve(__dirname, "..", "..", "..", "install-server.sh"), "utf8");
+  const installer = readFileSync(resolve(import.meta.dirname, "..", "..", "..", "install-server.sh"), "utf8");
 
   it("no longer claims empty input means allow-all", () => {
     expect(installer).not.toMatch(/empty for all/i);

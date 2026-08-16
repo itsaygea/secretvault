@@ -12,7 +12,7 @@
   "scripts": {
     "clean": "rm -rf packages/*/dist",
     "prebuild": "npm run clean",
-    "build": "(cd packages/shared && npm run build) && (cd packages/client && npm run build) && (cd packages/admin && npm run build) && (cd packages/bridge && npm run build) && (cd packages/sdk && npm run build) && (cd packages/mcp-server && npm run build)",
+    "build": "(cd packages/testing && npm run build) && (cd packages/shared && npm run build) && (cd packages/client && npm run build) && (cd packages/admin && npm run build) && (cd packages/bridge && npm run build) && (cd packages/sdk && npm run build) && (cd packages/mcp-server && npm run build)",
     "check:build-reproducibility": "node scripts/check-build-reproducibility.mjs",
     "check:schema-drift": "node scripts/check-schema-drift.mjs",
     "check:openapi-drift": "node scripts/check-openapi-drift.mjs",
@@ -20,7 +20,7 @@
     "dev:mcp": "tsx packages/mcp-server/src/index.ts",
 
     "deploy": "bash scripts/deploy.sh",
-    "test": "vitest"
+    "test": "node --import tsx --test --test-reporter=spec 'packages/*/src/**/*.test.ts'"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -38,7 +38,7 @@
   "devDependencies": {
 
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
+    "@secretvault/testing": "file:packages/testing",
     "tsx": "^4.16.0",
     "@types/node": "^22.0.0"
   },

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { handleUpdateCli } from "./cli/update.js";
 
 describe("CLI Auto-Updater (SV-AUD-007 / SV-AUD-012)", () => {

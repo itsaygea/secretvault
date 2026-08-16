@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { handleGetMe, handleChangePassword, handleAdminResetUserPassword } from "./users.js";
 
 describe("Browser Contracts & User Settings Endpoints", () => {

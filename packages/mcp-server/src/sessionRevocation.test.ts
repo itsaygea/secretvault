@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll } from "@secretvault/testing";
 import crypto from "node:crypto";
 import { generateToken, verifyToken, initAuth, resolveAuthContext } from "./api.js";
 import { bumpSessionEpoch } from "./users.js";

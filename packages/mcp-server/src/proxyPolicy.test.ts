@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 import { buildProxyTargetUrl, isProxyPathAllowed, isTargetOriginAllowed, isValidServiceName, isValidHeaderName, isValidCookieName, parseEgressAllowlist, safeDecodePathSegment, sanitizeRequestHeaders, sanitizeResponseHeaders, validateResolvedTarget, validateTargetUrl, validateProxyPathPrefixes, createSensitiveValueSet, containsSensitiveValue } from "./proxyPolicy.js";
 
 describe("proxy path policy", () => {

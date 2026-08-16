@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "@secretvault/testing";
 import bcrypt from "bcryptjs";
 import { authenticator } from "otplib";
 import { encryptSecret, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";

@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "@secretvault/testing";
 
 // #93 / #94 / #95 — Bundled PostgreSQL + PostgREST contract tests.
 //
@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 // text keeps the test free of a YAML dependency and matches the repo's existing
 // installerHardening.test.ts pattern. The merge behaviour it implies is also
 // exercised at deploy time by `docker compose -f ... -f ... config`.
-const repoRoot = resolve(__dirname, "..", "..", "..");
+const repoRoot = resolve(import.meta.dirname, "..", "..", "..");
 const bundled = readFileSync(
   resolve(repoRoot, "docker-compose.bundled.yml"),
   "utf8",

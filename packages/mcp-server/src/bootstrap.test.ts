@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { bootstrapAdmin, handleSetup, initSetupCode } from "./users.js";
 
 describe("Administrator Bootstrap & Setup Flow", () => {

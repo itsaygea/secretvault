@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect } from "@secretvault/testing";
 import { randomBytes } from "node:crypto";
 import {
   encryptSecret,
@@ -9,6 +9,8 @@ import {
   buildContextAad,
 } from "@secretvault/shared";
 import { rotateMasterKeyDatabase } from "./cli/rotateKey.js";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 
 /**
  * SV-AUD-006: master-key rotation is verified, resumable, and atomic per row.

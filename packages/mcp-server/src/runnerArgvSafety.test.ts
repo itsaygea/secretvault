@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "@secretvault/testing";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { readFileSync } from "node:fs";
@@ -70,11 +70,15 @@ afterAll(async () => {
 describe("runner: no secrets in any process cmdline (SV-AUD-007) — process", () => {
   it("keeps the marker out of every /proc/<pid>/cmdline after a real run", async () => {
     if (!isLinux) return; // /proc is Linux-only.
+    // detached: the CLI leads its own process group so the whole tree (CLI +
+    // its spawned target) can be killed together — otherwise the orphaned
+    // target inherits this process's stdio pipe and the runner never exits.
     const child = spawn(process.execPath, [
       CLI_JS, "run", "--secret", "API_KEY",
       "--", process.execPath, "-e", "setInterval(()=>{},50)",
     ], {
       cwd: PKG_DIR,
+      detached: true,
       env: {
         ...process.env,
         SECRETVAULT_URL: `http://127.0.0.1:${vaultPort}`,
@@ -93,7 +97,11 @@ describe("runner: no secrets in any process cmdline (SV-AUD-007) — process", (
         } catch { /* process exited */ }
       }
     } catch { /* /proc read race */ }
-    child.kill("SIGKILL");
+    try {
+      process.kill(-child.pid!, "SIGKILL"); // whole group: CLI + target
+    } catch {
+      child.kill("SIGKILL");
+    }
     expect(leaked).toBe(false);
   }, 10000);
 });
