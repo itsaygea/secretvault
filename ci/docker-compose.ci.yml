@@ -3,8 +3,8 @@
 # Replaces the previous health-only Supabase mock with a real PostgreSQL +
 # PostgREST stack so the application exercises the same grant/RLS/PostgREST
 # exposure path it relies on in production (SV-029). Migrations run against
-# real Postgres as a one-shot; runtime queries flow through real PostgREST
-# as service_role.
+# real Postgres as a one-shot; global/pre-auth queries flow through
+# service_role while tenant queries use sv_runtime with a tenant claim.
 #
 # Startup order: postgres -> migrate (one-shot) -> postgrest -> secretvault-mcp
 #

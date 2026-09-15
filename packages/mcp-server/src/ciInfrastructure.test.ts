@@ -81,6 +81,15 @@ describe("tenant service-role privilege boundary", () => {
 });
 
 describe("SV-029 CI PostgREST stack", () => {
+  it("asserts the runtime/service-role tenant boundary", () => {
+    const permissions = readFileSync(join(repoRoot, "ci", "postgrest-permissions.mjs"), "utf8");
+    expect(permissions).toMatch(/service_role[^\n]*denied|denied[^\n]*service_role/);
+    expect(permissions).toMatch(/sv_runtime/);
+    expect(permissions).toMatch(/JWT_TENANT_USER_ID/);
+    expect(permissions).toMatch(/access_logs/);
+    expect(permissions).toMatch(/secrets/);
+  });
+
   it("ci/secretvault.env service key matches the deterministic JWT minter", () => {
     const env = readCiEnv();
     const expected = runNode("ci/mint-jwt.mjs", ["service_role"]);

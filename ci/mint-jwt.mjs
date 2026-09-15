@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Mint the HS256 JWT that real PostgREST accepts as the SecretVault service
-// key in CI. The token carries role=service_role so PostgREST sets
-// request.jwt.claim.role and the 001 RLS policies pass, exactly as Supabase
-// Cloud does in production. Used by ci/secretvault.env generation.
+// Mint deterministic HS256 JWTs that real PostgREST accepts in CI. The default
+// role is service_role for global/pre-auth paths; tenant tests mint sv_runtime
+// with a tenant claim so PostgreSQL RLS, rather than application filters, is
+// the boundary. Used by ci/secretvault.env generation.
 //
 //   node ci/mint-jwt.mjs <role>            -> prints the JWT
 //   SERVICE_DATE_EPOCH / PGRST_JWT_SECRET env override defaults below

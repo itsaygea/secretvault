@@ -2,6 +2,10 @@ FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a55
 
 WORKDIR /app
 
+# The immutable Node base is reproducible; refresh Alpine packages so a
+# security fix published after the base image was built is present here too.
+RUN apk upgrade --no-cache
+
 # Copy manifests first so dependency installation remains cacheable.
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/admin/package.json packages/admin/
@@ -25,6 +29,10 @@ RUN npm prune --omit=dev
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS runtime
 
 WORKDIR /app
+
+# Keep the final image on the latest patched packages for the pinned Alpine
+# release (including OpenSSL security updates).
+RUN apk upgrade --no-cache
 
 # SV-AUD-001: the container binds its own interface (0.0.0.0) so a
 # TLS-terminating reverse proxy on the Compose network can reach it, but the
