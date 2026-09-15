@@ -25,7 +25,7 @@ export interface AuditEvent {
   sourceUserAgent?: string | null;
 }
 
-const SENSITIVE_QUERY_KEYS = /^(?:authorization|api[_-]?key|code|credential|key|password|secret|sig(?:nature)?|state|token)$/i;
+const SENSITIVE_QUERY_KEYS = /^(?:authorization|api[_-]?key|access[_-]?token|client[_-]?secret|code|credential|key|password|refresh[_-]?token|secret|sig(?:nature)?|state|token)$/i;
 
 /**
  * Operational alert sink. Set by the server at boot (see index.ts). When an
@@ -84,7 +84,10 @@ function normalizeMetadata(metadata: AuditMetadata | undefined): Json {
   if (!metadata) return {};
   const safe: AuditMetadata = {};
   for (const [key, value] of Object.entries(metadata)) {
-    if (/^[A-Za-z0-9_.-]{1,64}$/.test(key)) safe[key] = value;
+    if (!/^[A-Za-z0-9_.-]{1,64}$/.test(key)) continue;
+    safe[key] = SENSITIVE_QUERY_KEYS.test(key) || /(?:authorization|api[_-]?key|access|refresh|client[_-]?secret|credential|password|secret|token)/i.test(key)
+      ? "[REDACTED]"
+      : value;
   }
   return safe;
 }

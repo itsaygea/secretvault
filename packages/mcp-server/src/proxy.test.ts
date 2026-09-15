@@ -159,7 +159,20 @@ describe("proxy credential reflection (SV-AUD-003)", () => {
     expect(body).not.toContain(marker);
   });
 
-  it("streams a successful upstream body through unchanged (streaming preserved)", async () => {
+  it("blocks a successful upstream body that echoes an injected credential", async () => {
+    const marker = "vault-secret-12345678";
+    const { status, headers, body } = await runProxy((req, res) => {
+      const auth = req.headers.authorization ?? "";
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, reflected: auth }));
+    }, "/proxy/svc/success-leak", "bearer", "svc_pass");
+    expect(status).toBe(502);
+    expect(JSON.stringify(headers)).not.toContain(marker);
+    expect(body).not.toContain(marker);
+    expect(body).toContain("UPSTREAM_CREDENTIAL_REFLECTION");
+  });
+
+  it("forwards a safe successful upstream body unchanged", async () => {
     const { status, headers, body } = await runProxy((_req, res) => {
       res.writeHead(200, { "content-type": "text/plain", "x-trace": "ok" });
       res.end("hello upstream body");

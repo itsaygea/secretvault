@@ -382,6 +382,48 @@ export interface Database {
         };
         Relationships: [];
       };
+      proxy_access_tokens: {
+        Row: {
+          id: string;
+          user_id: string;
+          client_id: string;
+          token_hash: string;
+          scopes: string[];
+          key_version: number;
+          session_epoch: number;
+          expires_at: string;
+          last_used_at: string | null;
+          revoked_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          client_id: string;
+          token_hash: string;
+          scopes?: string[];
+          key_version: number;
+          session_epoch: number;
+          expires_at: string;
+          last_used_at?: string | null;
+          revoked_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          client_id?: string;
+          token_hash?: string;
+          scopes?: string[];
+          key_version?: number;
+          session_epoch?: number;
+          expires_at?: string;
+          last_used_at?: string | null;
+          revoked_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       rate_limit_buckets: {
         Row: {
           bucket_key: string;
@@ -440,6 +482,44 @@ export interface Database {
       rate_limit_reap: {
         Args: { p_before_window_start: number };
         Returns: undefined;
+      };
+      bump_session_epoch: {
+        Args: { p_user_id: string };
+        Returns: number;
+      };
+      authenticate_linking_key: {
+        Args: { p_key_hash: string };
+        Returns: {
+          client_id: string;
+          user_id: string;
+          scopes: string[];
+          key_version: number;
+          username: string;
+          is_admin: boolean;
+          session_epoch: number;
+        }[];
+      };
+      touch_client_application_last_used: {
+        Args: { p_client_id: string; p_last_used_at: string };
+        Returns: undefined;
+      };
+      authenticate_proxy_access_token: {
+        Args: { p_token_hash: string };
+        Returns: {
+          token_id: string;
+          user_id: string;
+          client_id: string;
+          token_scopes: string[];
+          token_key_version: number;
+          token_session_epoch: number;
+          expires_at: string;
+          revoked_at: string | null;
+          client_scopes: string[];
+          client_key_version: number;
+          username: string;
+          is_admin: boolean;
+          user_session_epoch: number;
+        }[];
       };
     };
   };

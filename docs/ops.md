@@ -93,19 +93,11 @@ environment.
 
 ## 3. Container Upgrades
 
-To upgrade SecretVault to the latest release, re-run the 1-liner installer (which preserves your existing `.env` and master key):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/itsaygea/secretvault/main/install-server.sh | bash
-```
-
-Or pull the latest changes and rebuild locally:
-
-```bash
-cd secretvault
-git pull origin main
-docker compose up -d --build
-```
+Follow the [Upgrade Guide](upgrade.md) before upgrading an existing
+installation. It covers the required PostgREST JWT secret, database backup,
+automatic migrations `024–030`, bundled versus external PostgreSQL Compose
+commands, the automated `upgrade-server.sh` updater, verification, and rollback
+cautions.
 
 ---
 
@@ -188,4 +180,3 @@ silent suppressions.
 
 See [`../SECURITY.md`](../SECURITY.md) for the private reporting path, response
 SLA, supported versions, and coordinated disclosure policy.
-

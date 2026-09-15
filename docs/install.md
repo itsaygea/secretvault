@@ -2,6 +2,11 @@
 
 This guide walks you through deploying a production-ready SecretVault instance using Docker Compose.
 
+For most installations, choose the bundled PostgreSQL backend offered by the
+installer; it is the default zero-dependency path. Existing Supabase, managed,
+shared, or HA PostgreSQL is an advanced external-backend option for operators
+who already run that infrastructure.
+
 > [!WARNING]
 > **CRITICAL: BACK UP YOUR MASTER KEY**  
 > SecretVault encrypts all stored credentials using your `SECRETVAULT_MASTER_KEY` with AES-256-GCM before writing to PostgreSQL.  
@@ -14,7 +19,9 @@ This guide walks you through deploying a production-ready SecretVault instance u
 Before installing SecretVault, ensure you have:
 
 - **Docker** 20.10+ & **Docker Compose** v2.0+ installed on your host server.
-- **Supabase Instance**: Either a free [Supabase Cloud](https://supabase.com) project or a self-hosted Supabase PostgreSQL instance. You will need:
+- **Database backend**: Either the bundled PostgreSQL stack (recommended for
+  most users) or an existing Supabase/managed/shared/HA PostgreSQL instance.
+  External backends additionally need:
   - Supabase URL (`https://<project-ref>.supabase.co`)
   - Supabase Service Role Key (`eyJ...`)
 
@@ -99,9 +106,9 @@ docker compose up -d --build
 
 ---
 
-### Option D: Bundled Local PostgreSQL (Zero-Dependency 1-Click)
+### Option D: Bundled Local PostgreSQL (Default for New Installs)
 
-If you do **not** already have Supabase or an external PostgreSQL instance,
+For a new installation, or whenever you do **not** already operate a database,
 SecretVault can run entirely self-contained in Docker Compose: a bundled
 `postgres:16-alpine` database plus a `postgrest/postgrest:v12.2.3` sidecar.
 No external infrastructure, no manual SQL — the installer provisions
@@ -139,9 +146,9 @@ Supabase Cloud. The bundled PostgreSQL port is never published to the host;
 API access is gated by the per-install `PGRST_JWT_SECRET`.
 
 > The bundled database is intended for single-node self-hosting (it stores
-> data in the `secretvault_postgres_data` named volume). For HA Postgres or a
-> managed database, use Option A/C with backend 2, or Supabase Cloud with
-> backend 3.
+> data in the `secretvault_postgres_data` named volume). If you already run
+> shared or HA PostgreSQL, choose backend 2 in the installer and keep using
+> the external Compose path; do not enable the bundled overlay.
 
 ---
 
@@ -168,6 +175,7 @@ API access is gated by the per-install `PGRST_JWT_SECRET`.
    # Direct PostgreSQL connection used for automatic startup migrations
    SECRETVAULT_DATABASE_URL=postgresql://postgres:password@db.example.com:5432/postgres
    SECRETVAULT_DATABASE_SSL=true
+   SECRETVAULT_PGRST_JWT_SECRET=your_existing_postgrest_jwt_secret
 
    # Admin Bootstrap Password (used ONLY on first container boot)
    SECRETVAULT_UI_PASSWORD=ChangeMeOnFirstBoot123!

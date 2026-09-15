@@ -104,4 +104,12 @@ Update your CLI binaries to the latest release at any time:
 secretvault update
 ```
 
-The auto-updater fetches the latest release from GitHub, re-builds system PATH binaries, and retains all your local credentials and developer tool configurations.
+The auto-updater resolves `main` to an immutable commit, downloads the installer from that exact commit, and preserves the local credential file and developer-tool configurations. It does not print or reconfigure credential values.
+
+To update from a specific verified commit instead of the current `main` tip:
+
+```bash
+SECRETVAULT_UPDATE_REF=0123456789abcdef0123456789abcdef01234567 secretvault update
+```
+
+The update command requires `git` when installing from an immutable commit. The installer refuses mutable release refs without an archive checksum.

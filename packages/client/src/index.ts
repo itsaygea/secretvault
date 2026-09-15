@@ -16,6 +16,8 @@ export interface SecretVaultClientOptions {
   timeoutMs?: number;
   userAgent?: string;
   allowInsecureHttp?: boolean;
+  /** Exchange the client key for short-lived proxy tokens (default true). */
+  useProxyAccessTokens?: boolean;
 }
 
 export interface ProxyRequestInit extends RequestInit {
@@ -59,6 +61,11 @@ export class SecretVaultClient {
   async proxy(serviceName: string, path = "/", init: ProxyRequestInit = {}): Promise<Response> {
     const { timeoutMs, ...requestInit } = init;
     return this.transport.fetchResponse(this.proxyUrl(serviceName, path), requestInit, { timeoutMs });
+  }
+
+  /** Return a short-lived proxy header for integrations that must own the fetch. */
+  async proxyHeaders(options: RequestOptions = {}): Promise<Record<string, string>> {
+    return this.transport.proxyHeaders(options);
   }
 
   async health(options: RequestOptions = {}): Promise<SecretVaultHealth> {

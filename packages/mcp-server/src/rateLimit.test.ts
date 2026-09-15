@@ -125,12 +125,29 @@ describe("rate limiter — trusted source-IP keying", () => {
     expect(resolveClientIp(proxied, config)).toBe("203.0.113.7");
   });
 
-  it("different source IPs key to different buckets (no cross-contamination)", async () => {
+  it("enforces the identity bucket even when the source IP changes", async () => {
     const limiter = new RateLimiter(new MemoryRateLimitStore(), fakeClock());
     for (let i = 0; i < OPTS.maxRequests; i++) await limiter.check({ scope: "login", ip: "1.1.1.1", identity: "u" }, OPTS);
     expect((await limiter.check({ scope: "login", ip: "1.1.1.1", identity: "u" }, OPTS)).allowed).toBe(false);
-    // A different IP is a separate bucket and must still be allowed.
-    expect((await limiter.check({ scope: "login", ip: "2.2.2.2", identity: "u" }, OPTS)).allowed).toBe(true);
+    // The account bucket is stable across source IPs.
+    expect((await limiter.check({ scope: "login", ip: "2.2.2.2", identity: "u" }, OPTS)).allowed).toBe(false);
+  });
+
+  it("enforces the source-IP bucket when the account identity changes", async () => {
+    const limiter = new RateLimiter(new MemoryRateLimitStore(), fakeClock());
+    for (let i = 0; i < OPTS.maxRequests; i++) await limiter.check({ scope: "login", ip: "3.3.3.3", identity: `u${i}` }, OPTS);
+    expect((await limiter.check({ scope: "login", ip: "3.3.3.3", identity: "another" }, OPTS)).allowed).toBe(false);
+  });
+
+  it("retains cooldown across a fixed-window boundary", async () => {
+    const start = 1_700_000_000_000 + (OPTS.windowMs - (1_700_000_000_000 % OPTS.windowMs)) - 1_000;
+    const clock = fakeClock(start);
+    const limiter = new RateLimiter(new MemoryRateLimitStore(), clock);
+    for (let i = 0; i < OPTS.maxRequests + 1; i++) await limiter.check({ scope: "login", ip: "4.4.4.4", identity: "u" }, OPTS);
+    clock.advance(1_001);
+    const whileCooling = await limiter.check({ scope: "login", ip: "4.4.4.4", identity: "u" }, OPTS);
+    expect(whileCooling.allowed).toBe(false);
+    expect(whileCooling.retryAfterSeconds).toBeGreaterThan(0);
   });
 
   it("CIDR matching handles IPv4-mapped IPv6 peers", () => {

@@ -6,6 +6,10 @@ export const MAX_PAGE_SIZE = 200;
 export interface PaginationParams {
   cursor?: string | null;
   pageSize?: number;
+  /** Case-insensitive metadata search for secret name/display name. */
+  search?: string | null;
+  /** Optional exact environment filter. */
+  environment?: string | null;
 }
 
 export interface PageResult<T> {
@@ -101,7 +105,19 @@ function isValidUuid(value: unknown): value is string {
  * PostgREST accepts double-quoted string literals with embedded quotes doubled.
  */
 export function escapePostgrestValue(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`;
+  // PostgREST quoted literals use backslash escaping. SQL-style doubled
+  // quotes are not equivalent in the URL grammar and can be parsed as
+  // additional filter syntax by the server.
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Escape the wildcard and escape characters used by PostgREST `ilike`.
+ * The returned value is still wrapped with {@link escapePostgrestValue} by
+ * callers so punctuation in a user search cannot become filter grammar.
+ */
+export function escapePostgrestLike(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
 export function encodeCursor(after: string, tiebreaker: string): string {

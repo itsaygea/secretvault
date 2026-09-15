@@ -137,6 +137,7 @@ export const ROUTES: readonly RouteSpec[] = [
   { method: "DELETE", path: "/v1/service-profiles/{id}", auth: "scope", scope: "profiles:write" },
   { method: "GET", path: "/v1/user/logs", auth: "scope", scope: "secrets:metadata:read" },
   { method: "GET", path: "/v1/user/logs/export", auth: "scope", scope: "secrets:metadata:read" },
+  { method: "POST", path: "/v1/client/token", auth: "scope", scope: "proxy:*" },
 
   // ── runner (client plaintext read — capability-scoped per secret) ───
   // Documented in OpenAPI as the client secret-resolution route.

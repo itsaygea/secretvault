@@ -1,4 +1,4 @@
-export type CredentialType = "session" | "linking_key";
+export type CredentialType = "session" | "linking_key" | "proxy_token";
 
 export interface Principal {
   userId: string;
@@ -51,6 +51,7 @@ function scopeMatches(granted: string, required: string): boolean {
   if (granted === "*") return true;
   if (granted === required) return true;
   if (required.startsWith("proxy:") && granted === "proxy:*") return true;
+  if (required === "proxy:*" && granted.startsWith("proxy:") && granted.length > "proxy:".length) return true;
   if (required.startsWith("runner:secret:") && (granted === "runner:secret:*" || granted === "*")) return true;
   return false;
 }
@@ -65,7 +66,11 @@ export function hasScope(principal: Principal, required: string): boolean {
 }
 
 export function hasRunnerScope(principal: Principal, canonicalSecretName: string): boolean {
-  if (principal.credentialType === "session") return true;
+  // Human sessions must use the step-up-gated reveal flow. The runner route
+  // returns plaintext for process injection and is reserved for explicit
+  // linking-key capabilities; treating every session as a runner wildcard
+  // bypasses that boundary.
+  if (principal.credentialType === "session") return false;
   const canonical = canonicalSecretName.trim().toLowerCase();
   return principal.scopes.some(scope => {
     const s = scope.trim().toLowerCase();
@@ -78,4 +83,3 @@ export function hasRunnerScope(principal: Principal, canonicalSecretName: string
 export function isSessionPrincipal(principal: Principal): boolean {
   return principal.credentialType === "session";
 }
-

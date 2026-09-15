@@ -85,6 +85,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@secretvault/shared";
 import { resolveMasterKey } from "./keyLoader.js";
 import { initCursorKey } from "./pagination.js";
+import { LIMITS } from "./validation.js";
 import { registerAllTools } from "./tools/index.js";
 import {
   initAuth,
@@ -125,7 +126,7 @@ import {
   handleSelfRegister,
   handleAdminResetUserPassword,
   handleAdminResetUser2FA,
-  bumpSessionEpoch,
+  bumpSessionEpochOrThrow,
 } from "./users.js";
 import {
   initStepUpAuth,
@@ -150,6 +151,7 @@ import {
   handleDeleteProfile,
 } from "./serviceProfiles.js";
 import { handleProxyRequest, destroyProxyAgents } from "./proxy.js";
+import { issueProxyAccessToken } from "./proxyTokens.js";
 import { canonicalServiceName, isValidServiceName, safeDecodePathSegment } from "./proxyPolicy.js";
 import { resolveMcpAuth, mcpAuthSnapshot, mcpSnapshotsEqual } from "./mcpAuth.js";
 import { hasScope, hasRunnerScope, isSessionPrincipal, type Principal } from "./authz.js";
@@ -214,6 +216,7 @@ const RATE_LIMIT_LIMITS = buildRateLimitLimits({
   maxLogin: process.env.SECRETVAULT_RATE_LIMIT_MAX_LOGIN,
   maxRegister: process.env.SECRETVAULT_RATE_LIMIT_MAX_REGISTER,
   maxTotp: process.env.SECRETVAULT_RATE_LIMIT_MAX_TOTP,
+  maxToken: process.env.SECRETVAULT_RATE_LIMIT_MAX_TOKEN,
 });
 // The store is built once the supabase client exists (below); the limiter is
 // exported so tests can swap it via configureServerForTests.
@@ -285,7 +288,9 @@ let supabase: SupabaseClient<Database, "secretvault"> = (SUPABASE_URL && SUPABAS
       // SV-AUD-013: stamp the per-request tenant JWT onto each DB request when a
       // tenant context is active, so PostgREST exposes it as request.jwt.claims
       // and the tenant RLS policies enforce isolation at the database.
-      ...(isTenantAuthInitialized() ? { fetch: tenantAwareFetch(globalThis.fetch) } : {}),
+      ...(isTenantAuthInitialized()
+        ? { global: { fetch: tenantAwareFetch(globalThis.fetch.bind(globalThis)) } }
+        : {}),
     })
   : (null as unknown as SupabaseClient<Database, "secretvault">);
 
@@ -409,6 +414,7 @@ function buildRateLimitLimits(env: {
   maxLogin?: string;
   maxRegister?: string;
   maxTotp?: string;
+  maxToken?: string;
 }): Record<RateLimitScope, ReturnType<typeof limitFor>> {
   const windowMs = clampInt(env.windowMs, 1_000, 3_600_000, DEFAULT_LIMITS.login.windowMs);
   return {
@@ -416,6 +422,7 @@ function buildRateLimitLimits(env: {
     register: limitFor(windowMs, env.maxRegister, DEFAULT_LIMITS.register.maxRequests, DEFAULT_LIMITS.register),
     setup: limitFor(windowMs, env.maxRegister, DEFAULT_LIMITS.setup.maxRequests, DEFAULT_LIMITS.setup),
     totp: limitFor(windowMs, env.maxTotp, DEFAULT_LIMITS.totp.maxRequests, DEFAULT_LIMITS.totp),
+    token: limitFor(windowMs, env.maxToken, DEFAULT_LIMITS.token.maxRequests, DEFAULT_LIMITS.token),
   };
 }
 
@@ -503,6 +510,11 @@ async function handleStreamableHttpRequest(req: IncomingMessage, res: ServerResp
         res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized MCP session" }, id: null }));
         return;
       }
+      enterTenantContext({
+        userId: currentPrincipal.userId,
+        clientId: currentPrincipal.clientId,
+        isAdmin: false,
+      });
       const transport = transports[sessionId];
       if (transport instanceof StreamableHTTPServerTransport) {
         await transport.handleRequest(req, res);
@@ -540,6 +552,8 @@ async function handleStreamableHttpRequest(req: IncomingMessage, res: ServerResp
           res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32003, message: "Forbidden. The linking key lacks the mcp:read scope." }, id: null }));
           return;
         }
+
+        enterTenantContext({ userId: mcpAuth.userId, clientId: mcpAuth.clientId, isAdmin: false });
 
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
@@ -584,9 +598,9 @@ async function handleStreamableHttpRequest(req: IncomingMessage, res: ServerResp
 
 const VALID_OUTCOMES = new Set(["succeeded", "failed", "denied", "unknown"]);
 
-function parsePaginationQuery(url: URL): { cursor?: string | null; pageSize?: number } {
+function parsePaginationQuery(url: URL): { cursor?: string | null; pageSize?: number; search?: string | null; environment?: string | null } {
   const sp = url.searchParams;
-  const query: { cursor?: string | null; pageSize?: number } = {};
+  const query: { cursor?: string | null; pageSize?: number; search?: string | null; environment?: string | null } = {};
   const cursor = sp.get("cursor");
   if (cursor) query.cursor = cursor;
   const ps = sp.get("page_size");
@@ -594,6 +608,10 @@ function parsePaginationQuery(url: URL): { cursor?: string | null; pageSize?: nu
     const n = parseInt(ps, 10);
     if (Number.isFinite(n) && n > 0) query.pageSize = n;
   }
+  const search = sp.get("search")?.trim();
+  if (search && search.length <= LIMITS.SECRET_NAME_MAX) query.search = search;
+  const environment = sp.get("environment")?.trim().toLowerCase();
+  if (environment && /^[a-z0-9_.-]{1,64}$/.test(environment)) query.environment = environment;
   return query;
 }
 
@@ -793,6 +811,38 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     }).catch(() => undefined);
   };
 
+  // Proxy access tokens are deliberately proxy-only. They carry the narrow
+  // proxy capability set and must never become a second management credential.
+  if (authCtx.credentialType === "proxy_token") {
+    recordDenied("proxy_token_management_use");
+    return sendResponse({ status: 403, body: { error: "Proxy access tokens are valid only for proxy requests" } });
+  }
+
+  const revokeSessionsOrFail = async (operation: string): Promise<boolean> => {
+    try {
+      await bumpSessionEpochOrThrow(supabase, authCtx.userId);
+      return true;
+    } catch {
+      void recordAuditEvent(supabase, {
+        userId: authCtx.userId,
+        clientId: authCtx.clientId,
+        secretName: "account",
+        accessType: "session_revocation_failed",
+        caller: `rest:${req.method || "GET"}:${url.pathname}`,
+        outcome: "failed",
+        metadata: { operation },
+      }).catch(() => undefined);
+      sendResponse({
+        status: 503,
+        body: {
+          error: "Session revocation unavailable; operation blocked",
+          code: "SESSION_REVOCATION_UNAVAILABLE",
+        },
+      });
+      return false;
+    }
+  };
+
   const requireScope = (scope: string): boolean => {
     if (hasScope(authCtx, scope)) return true;
     recordDenied("missing_scope", { required_scope: scope });
@@ -813,6 +863,20 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     void sendResponse({ status: 403, body: { error: "Forbidden" } });
     return false;
   };
+
+  // POST /v1/client/token or /api/client/token — exchange a client linking key
+  // for a short-lived, client-bound proxy bearer token. This route is kept
+  // inside the authenticated branch so no token material is issued publicly.
+  if (url.pathname === "/api/client/token" && req.method === "POST") {
+    if (authCtx.credentialType !== "linking_key" || !authCtx.clientId || !hasScope(authCtx, "proxy:*")) {
+      recordDenied("client_token_requires_proxy_linking_key");
+      return sendResponse({ status: 403, body: { error: "A proxy-capable client linking key is required" } });
+    }
+    const body = await parseBodyOr413() as { scopes?: unknown } | null;
+    if (!body) return;
+    if (await enforceRateLimit("token", authCtx.clientId, authCtx.username)) return;
+    return sendResponse(await issueProxyAccessToken(supabase, authCtx, body.scopes));
+  }
 
   /**
    * SV-AUD-002: require a purpose-bound reauthentication grant for a factor-
@@ -1053,9 +1117,8 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     // SV-AUD-002: deleting a passkey requires an existing-factor reauth grant
     // bound to exactly this credential id, then revokes older sessions.
     if (!requireReauth(`webauthn:delete:${passkeyDeleteMatch[1]}`)) return;
-    const res = await handleDeletePasskey(supabase, authCtx.userId, passkeyDeleteMatch[1]);
-    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
-    return sendResponse(res);
+    if (!(await revokeSessionsOrFail("webauthn:delete"))) return;
+    return sendResponse(await handleDeletePasskey(supabase, authCtx.userId, passkeyDeleteMatch[1]));
   }
 
   if (url.pathname === "/api/auth/webauthn/register-options" && req.method === "POST") {
@@ -1070,11 +1133,10 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     const body = await parseBodyOr413() as { response?: any; device_name?: string } | null;
     if (!body) return;
     // The registration challenge was issued only because a webauthn:add grant
-    // was consumed at register-options; verifying it adds a factor, so revoke
-    // older sessions on success.
-    const res = await handleWebAuthnRegisterVerify(supabase, authCtx.userId, rpID, origin, body);
-    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
-    return sendResponse(res);
+    // was consumed at register-options. Revoke first so a successful factor
+    // mutation can never leave older sessions alive if the DB becomes flaky.
+    if (!(await revokeSessionsOrFail("webauthn:add"))) return;
+    return sendResponse(await handleWebAuthnRegisterVerify(supabase, authCtx.userId, rpID, origin, body));
   }
 
   if (url.pathname === "/api/auth/webauthn/authenticate-options" && req.method === "POST") {
@@ -1117,11 +1179,10 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     if (!body) return;
     // SV-AUD-011: bound the 6-digit enrollment-verify guessing surface per user.
     if (await enforceRateLimit("totp", authCtx.userId, authCtx.username)) return;
-    // The pending enrollment exists only because setup was reauth-gated; verifying
-    // it promotes/replaces the factor, so revoke older sessions on success.
-    const res = await handleTotpVerifySetup(supabase, masterKey, authCtx.userId, body);
-    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
-    return sendResponse(res);
+    // The pending enrollment exists only because setup was reauth-gated. Revoke
+    // before promoting/replacing the factor so this boundary fails closed.
+    if (!(await revokeSessionsOrFail("totp:verify-setup"))) return;
+    return sendResponse(await handleTotpVerifySetup(supabase, masterKey, authCtx.userId, body));
   }
 
   if (url.pathname === "/api/auth/totp/authenticate" && req.method === "POST") {
@@ -1144,9 +1205,8 @@ async function handleApiRoute(req: IncomingMessage, res: ServerResponse, url: UR
     // SV-AUD-002: disabling TOTP requires an existing-factor reauth grant, then
     // revokes older sessions.
     if (!requireReauth("totp:disable")) return;
-    const res = await handleDisableTotp(supabase, authCtx.userId);
-    if (res.status === 200) void bumpSessionEpoch(supabase, authCtx.userId).catch(() => undefined);
-    return sendResponse(res);
+    if (!(await revokeSessionsOrFail("totp:disable"))) return;
+    return sendResponse(await handleDisableTotp(supabase, authCtx.userId));
   }
 
   // SV-AUD-002: current-password reauthentication mints a purpose-bound grant
@@ -1427,6 +1487,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       writeErrorResponse(res, 403, "Linking key is not authorized for this service profile", getRequestId(req));
       return;
     }
+    // The proxy is a tenant route too. Bind its profile/secret lookup and
+    // audit writes to the authenticated user before entering the handler.
+    enterTenantContext({
+      userId: proxyAuth.userId,
+      clientId: proxyAuth.clientId,
+      isAdmin: isSessionPrincipal(proxyAuth) && proxyAuth.isAdmin,
+    });
     return handleProxyRequest(req, res, supabase, masterKey, proxyAuth, serviceName);
   }
 
@@ -1455,6 +1522,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       res.end(JSON.stringify({ error: "Forbidden. The linking key lacks the mcp:read scope." }));
       return;
     }
+
+    enterTenantContext({ userId: mcpAuth.userId, clientId: mcpAuth.clientId, isAdmin: false });
 
     const transport = new SSEServerTransport("/message", res);
     transports[transport.sessionId] = transport;
@@ -1500,6 +1569,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       res.end(JSON.stringify({ error: "Unauthorized MCP session" }));
       return;
     }
+
+    enterTenantContext({ userId: currentPrincipal.userId, clientId: currentPrincipal.clientId, isAdmin: false });
 
     const transport = transports[sessionId];
     if (transport instanceof SSEServerTransport) {

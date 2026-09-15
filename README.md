@@ -25,7 +25,7 @@ Traditional secret managers return raw plaintext API keys and database passwords
 graph TD
     User["👤 Human Operator (Browser Web UI)"] -->|"Step-Up Auth (Passkey/TOTP)"| WebUI["🌐 SecretVault Web UI (/ui)"]
     Claude["🤖 Claude Code / AI Agent"] -->|"Streamable HTTP / SSE"| MCP["⚡ SecretVault MCP Server (:3004)"]
-    App["💻 Application / Agent Code"] -->|"proxy() with sv_... key"| Proxy["🔒 Credential Proxy (/proxy/*)"]
+    App["💻 Application / Agent Code"] -->|"proxy() with short-lived access token"| Proxy["🔒 Credential Proxy (/proxy/*)"]
 
     MCP -->|"Masked Previews / References"| Claude
     Proxy -->|"Inject Decrypted Credential"| Upstream["☁️ Upstream Service (GitHub, OpenAI, etc.)"]
@@ -80,6 +80,13 @@ curl http://localhost:3004/health/ready
 # Open http://localhost:3004/ui in browser
 ```
 
+For an existing source checkout, use the backup-first server updater:
+
+```bash
+bash upgrade-server.sh --dry-run
+bash upgrade-server.sh --yes
+```
+
 ---
 
 ### Step 2: Connect Developer AI Tools & Clients
@@ -131,6 +138,7 @@ secretvault secret delete
 - ⚡ **[MCP & Developer Tools Guide](docs/mcp.md)** — Integration guide for Antigravity IDE, Claude Code, Claude Desktop, OpenCode, Codex, Cursor.
 - 📦 **[SDKs & Client Libraries](docs/sdk.md)** — Integration via `@secretvault/client`, `@secretvault/admin`, Python & Bash scripts.
 - 🛠️ **[Server Operations & Hosting Guide](docs/server.md)** — Docker Compose, environment variables, health checks, master key rotation.
+- 🔄 **[Upgrade Guide](docs/upgrade.md)** — Safe upgrades from older deployments, migrations, backups, and rollback cautions.
 - 🚀 **[Self-Host & Installation Guide](docs/install.md)** — Step-by-step production deployment guide.
 - 📜 **[Versioned HTTP Contract](docs/openapi.json)** — OpenAPI 3.1 management/metadata schema and proxy contract surface.
 - 🛡️ **[Security Architecture & Threat Model](docs/security.md)** — AES-256-GCM cipher details, memory isolation, Passkey/TOTP step-up auth.
@@ -149,7 +157,7 @@ secretvault/
 │   ├── admin/           # Management client (@secretvault/admin)
 │   ├── bridge/          # Deprecated proxy compatibility adapter
 │   └── sdk/             # Deprecated migration alias
-├── supabase/migrations/ # PostgreSQL schema migrations (001 - 011)
+├── supabase/migrations/ # PostgreSQL schema migrations (001 - 030)
 ├── docs/                # Public user guides (install, usage, security, ops)
 ├── Dockerfile           # Multi-stage production container build
 └── docker-compose.yml   # Production Docker Compose distribution

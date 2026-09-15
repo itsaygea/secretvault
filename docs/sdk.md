@@ -27,6 +27,12 @@ const response = await vault.proxy("qbittorrent", "/api/v2/torrents/info");
 const data = await response.json();
 ```
 
+The client exchanges the stored linking key for a short-lived, client-bound
+proxy access token automatically. Proxy calls send the
+`svt_1234567890abcdef...` token; the
+linking key is used only for the token exchange. Set
+`useProxyAccessTokens: false` only for compatibility with an older server.
+
 ---
 
 ## 2. Programmatic Admin Client (`@secretvault/admin`)
@@ -68,10 +74,23 @@ with open(cred_file) as f:
 vault_url = creds.get("url", "https://vault.example.com")
 client_key = creds["clientKey"]
 
+# Exchange the long-lived client key for a short-lived proxy token
+exchange = urllib.request.Request(
+    f"{vault_url}/v1/client/token",
+    data=b"{}",
+    headers={
+        "Authorization": f"Bearer {client_key}",
+        "Content-Type": "application/json",
+    },
+    method="POST",
+)
+with urllib.request.urlopen(exchange) as resp:
+    proxy_token = json.loads(resp.read().decode())["access_token"]
+
 # Issue request through SecretVault reverse proxy
 req = urllib.request.Request(
     f"{vault_url}/proxy/example_service/v1/resource",
-    headers={"Authorization": f"Bearer {client_key}"}
+    headers={"Authorization": f"Bearer {proxy_token}"}
 )
 with urllib.request.urlopen(req) as resp:
     data = json.loads(resp.read().decode())
@@ -83,5 +102,11 @@ with urllib.request.urlopen(req) as resp:
 KEY=$(jq -r .clientKey ~/.secretvault/credential.json)
 URL=$(jq -r .url ~/.secretvault/credential.json)
 
-curl -s -H "Authorization: Bearer $KEY" "$URL/proxy/example_service/v1/resource"
+# Exchange it for a short-lived proxy token before making proxy requests.
+TOKEN=$(curl -fsS -X POST "$URL/v1/client/token" \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{}' | jq -r .access_token)
+curl -s -H "Authorization: Bearer $TOKEN" "$URL/proxy/example_service/v1/resource"
+unset KEY TOKEN URL
 ```

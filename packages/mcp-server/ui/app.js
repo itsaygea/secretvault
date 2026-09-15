@@ -1,7 +1,7 @@
 import { showAuthCard, submitLogin, submitRegister, submitSetup, initDashboard, loadUserMe, logout, registerPasskey, verifyStepUpPasskey, verifyStepUpTotp, verifyStepUpBackup, triggerSecretReveal, triggerClientKeyReveal, regenerateClientKey, loadPasskeys, openStepUpChooser, toggleOpenRegistration } from "./js/auth.js";
 import { updateDocsSnippets, openTotpSetupModal, cancelTotpSetup, verifyTotpSetup, copyBackupCodes, downloadBackupCodes, printBackupCodes, acknowledgeBackupCodes, regenerateBackupCodes, disableTotp, deletePasskey, submitChangePassword } from "./js/features/settings.js";
-import { openAddSecretModal, submitAddSecret, openRotateSecretModal, submitRotateSecret, deleteSecret, addTagPill, loadSecrets } from "./js/features/secrets.js";
-import { openCreateClientModal, submitCreateClient, openEditClientModal, submitUpdateClient, viewClientLogs, renderClientLogs, revokeClient, loadClients } from "./js/features/clients.js";
+import { openAddSecretModal, submitAddSecret, openRotateSecretModal, submitRotateSecret, deleteSecret, addTagPill, loadSecrets, handleSecretSearchInput } from "./js/features/secrets.js";
+import { openCreateClientModal, submitCreateClient, openEditClientModal, submitUpdateClient, viewClientLogs, renderClientLogs, revokeClient, loadClients, handleClientSearchInput } from "./js/features/clients.js";
 import { openCreateProfileModal, renderProfileAuthFields, toggleInlineUserSecret, toggleInlinePassSecret, submitCreateProfile, deleteProfile, loadProfiles } from "./js/features/profiles.js";
 import { loadActivity, renderActivity } from "./js/features/activity.js";
 import { loadUsers, loadAdminStats, openAddUserModal, submitAddUser, deleteUser, openAdminResetPassModal, submitAdminResetPassword, resetUser2FA } from "./js/features/users.js";
@@ -38,6 +38,19 @@ setupSensitiveCleanup();
 setupDialogKeyboard();
 setupAccessibility();
 
+const backToTopButton = document.getElementById("back-to-top");
+function updateBackToTopVisibility() {
+  if (!backToTopButton) return;
+  const scrollTop = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  const visible = scrollTop > 360;
+  backToTopButton.classList.toggle("is-visible", visible);
+  backToTopButton.setAttribute("aria-hidden", String(!visible));
+  backToTopButton.tabIndex = visible ? 0 : -1;
+}
+
+window.addEventListener("scroll", updateBackToTopVisibility, { passive: true });
+updateBackToTopVisibility();
+
 document.addEventListener("click", (event) => {
   const target = event.target.closest?.("[data-action]");
   if (!target) return;
@@ -51,6 +64,21 @@ document.addEventListener("click", (event) => {
       if (main) {
         main.setAttribute("tabindex", "-1");
         main.focus({ preventScroll: false });
+      }
+      break;
+    }
+    case "back-to-top": {
+      const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+      window.scrollTo({ top: 0, behavior: reducedMotion ? "auto" : "smooth" });
+      const activeTab = document.querySelector("#primary-tablist .nav-tab.active");
+      if (activeTab) {
+        activeTab.focus({ preventScroll: true });
+      } else {
+        const main = document.getElementById("dashboard-view") || document.getElementById("auth-view");
+        if (main) {
+          main.setAttribute("tabindex", "-1");
+          main.focus({ preventScroll: true });
+        }
       }
       break;
     }
@@ -93,6 +121,10 @@ document.addEventListener("click", (event) => {
     case "reveal-secret": triggerSecretReveal(target.dataset.secretName); break;
     case "rotate-secret": openRotateSecretModal(target.dataset.secretName); break;
     case "delete-secret": deleteSecret(target.dataset.secretName); break;
+    case "previous-secrets-page": loadSecrets({ reset: false, direction: "previous" }); break;
+    case "next-secrets-page": loadSecrets({ reset: false, direction: "next" }); break;
+    case "previous-clients-page": loadClients({ reset: false, direction: "previous" }); break;
+    case "next-clients-page": loadClients({ reset: false, direction: "next" }); break;
     case "reveal-client-key": triggerClientKeyReveal(target.dataset.clientId, target.dataset.appName); break;
     case "edit-client": openEditClientModal(target.dataset.clientId); break;
     case "regenerate-from-edit": regenerateClientKey(document.getElementById("edit-client-id")?.value || "", document.getElementById("edit-client-name")?.value || ""); closeModal("modal-edit-client"); break;
@@ -133,7 +165,7 @@ document.addEventListener("change", (event) => {
   if (!select) return;
   const action = select.dataset.changeAction;
   switch (action) {
-    case "reload-secrets": loadSecrets(); break;
+    case "reload-secrets": loadSecrets({ reset: true }); break;
     case "inline-user-secret": toggleInlineUserSecret(select.value); break;
     case "inline-pass-secret": toggleInlinePassSecret(select.value); break;
     case "profile-auth-fields": renderProfileAuthFields(select.value); break;
@@ -158,6 +190,18 @@ document.addEventListener("change", (event) => {
 
 let totpAutoSubmitTimers = {};
 document.addEventListener("input", (event) => {
+  const searchInput = event.target.closest?.('[data-input-action="search-secrets"]');
+  if (searchInput) {
+    handleSecretSearchInput(searchInput.value);
+    return;
+  }
+
+  const clientSearchInput = event.target.closest?.('[data-input-action="search-clients"]');
+  if (clientSearchInput) {
+    handleClientSearchInput(clientSearchInput.value);
+    return;
+  }
+
   const box = event.target.closest?.(".totp-pin-box");
   if (!box) return;
   const container = box.closest(".totp-pin-container");

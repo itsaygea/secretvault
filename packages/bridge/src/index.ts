@@ -27,8 +27,6 @@ export interface BridgeConfig extends Omit<SecretVaultClientOptions, "baseUrl" |
 }
 
 export class SecretBridge extends SecretVaultClient {
-  private readonly linkingKey: string;
-
   constructor(config: BridgeConfig) {
     super({
       baseUrl: config.serverUrl,
@@ -37,8 +35,8 @@ export class SecretBridge extends SecretVaultClient {
       timeoutMs: config.timeoutMs,
       userAgent: config.userAgent ?? "SecretVaultBridge/0.1.0",
       allowInsecureHttp: config.allowInsecureHttp ?? true,
+      useProxyAccessTokens: config.useProxyAccessTokens,
     });
-    this.linkingKey = config.linkingKey;
   }
 
   /** @deprecated Use proxy(). */
@@ -46,9 +44,9 @@ export class SecretBridge extends SecretVaultClient {
     return this.proxy(serviceName, path, init);
   }
 
-  /** @deprecated Use proxy() so HeadersInit merging and auth ownership stay centralized. */
-  proxyHeaders(): Record<string, string> {
-    return { Authorization: `Bearer ${this.linkingKey}` };
+  /** @deprecated Use proxy(); this now returns a short-lived access-token header. */
+  override async proxyHeaders(): Promise<Record<string, string>> {
+    return super.proxyHeaders();
   }
 }
 

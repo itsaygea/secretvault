@@ -6,6 +6,15 @@ import { closeModal, openModal, promptConfirmAction } from "../dialog.js";
 import { setResourceState } from "../state.js";
 import { updateDocsSnippets } from "./settings.js";
 
+const CLIENT_PAGE_SIZE = 25;
+const clientView = {
+  cursor: null,
+  nextCursor: null,
+  cursorHistory: [],
+  search: "",
+};
+let clientSearchTimer = null;
+
 function setFormBusy(formId, busy) {
   const form = document.getElementById(formId);
   if (form) form.setAttribute("aria-busy", String(busy));
@@ -14,25 +23,102 @@ function setFormBusy(formId, busy) {
   });
 }
 
-export async function loadClients() {
+function syncClientFilters() {
+  const searchInput = document.getElementById("search-clients");
+  if (searchInput) clientView.search = String(searchInput.value || "").trim().slice(0, 128);
+}
+
+function renderClientsPagination(itemCount) {
+  const status = document.getElementById("clients-page-status");
+  const previousButton = document.querySelector('[data-action="previous-clients-page"]');
+  const nextButton = document.querySelector('[data-action="next-clients-page"]');
+  const loading = getResourceState("clients").loading;
+  const pageNumber = clientView.cursorHistory.length + 1;
+
+  if (status) {
+    if (loading) {
+      status.textContent = "Loading client applications…";
+    } else if (itemCount === 0) {
+      status.textContent = "No matching client applications.";
+    } else {
+      const countLabel = `${itemCount} client application${itemCount === 1 ? "" : "s"}`;
+      status.textContent = `Page ${pageNumber} · ${countLabel}${clientView.nextCursor ? " · more available" : ""}`;
+    }
+  }
+
+  if (previousButton) {
+    previousButton.disabled = loading || clientView.cursorHistory.length === 0;
+    previousButton.setAttribute("aria-disabled", String(previousButton.disabled));
+  }
+  if (nextButton) {
+    nextButton.disabled = loading || !clientView.nextCursor;
+    nextButton.setAttribute("aria-disabled", String(nextButton.disabled));
+  }
+}
+
+export async function loadClients({ reset = true, direction = "current" } = {}) {
   const tbody = document.getElementById("clients-table-body");
   if (!tbody) return;
-  setResourceState("clients", { loading: true, error: null });
 
-  const result = await apiGet("/v1/clients", { resourceKey: "clients" });
+  syncClientFilters();
+
+  const previousView = {
+    cursor: clientView.cursor,
+    nextCursor: clientView.nextCursor,
+    cursorHistory: [...clientView.cursorHistory],
+  };
+
+  if (reset) {
+    clientView.cursor = null;
+    clientView.nextCursor = null;
+    clientView.cursorHistory = [];
+  } else if (direction === "next" && clientView.nextCursor) {
+    clientView.cursorHistory.push(clientView.cursor);
+    clientView.cursor = clientView.nextCursor;
+    clientView.nextCursor = null;
+  } else if (direction === "previous" && clientView.cursorHistory.length > 0) {
+    clientView.cursor = clientView.cursorHistory.pop();
+    clientView.nextCursor = null;
+  }
+
+  setResourceState("clients", { loading: true, error: null });
+  renderClientsPagination(0);
+
+  const params = new URLSearchParams({ page_size: String(CLIENT_PAGE_SIZE) });
+  if (clientView.cursor) params.set("cursor", clientView.cursor);
+  if (clientView.search) params.set("search", clientView.search);
+  const result = await apiGet(`/v1/clients?${params.toString()}`, { resourceKey: "clients" });
   if (result.error) {
+    clientView.cursor = previousView.cursor;
+    clientView.nextCursor = previousView.nextCursor;
+    clientView.cursorHistory = previousView.cursorHistory;
     setResourceState("clients", { loading: false, error: result.error.message });
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--accent-rose);">Failed to load clients: ${escapeHtml(result.error.message)}</td></tr>`;
+    renderClientsPagination(0);
     return;
   }
 
-  const data = extractList(result.data);
-  setState({ clientAppsList: data });
+  const responsePage = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+    ? result.data
+    : { data: result.data };
+  const data = extractList(responsePage);
+  clientView.nextCursor = typeof responsePage.next_cursor === "string" && responsePage.next_cursor.length > 0
+    ? responsePage.next_cursor
+    : null;
+  setState({
+    clientAppsList: data,
+    clientPagination: {
+      pageSize: CLIENT_PAGE_SIZE,
+      page: clientView.cursorHistory.length + 1,
+      hasNext: Boolean(clientView.nextCursor),
+    },
+  });
   setResourceState("clients", { loading: false, error: null });
   updateDocsSnippets();
 
   if (data.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">No client apps registered yet. Click "+ Register Client App".</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">No matching client applications. Click "+ Register Client App" to create one.</td></tr>`;
+    renderClientsPagination(0);
     return;
   }
   tbody.innerHTML = data
@@ -60,6 +146,16 @@ export async function loadClients() {
   `;
     })
     .join("");
+  renderClientsPagination(data.length);
+}
+
+export function handleClientSearchInput(value) {
+  clientView.search = String(value || "").trim().slice(0, 128);
+  if (clientSearchTimer) clearTimeout(clientSearchTimer);
+  clientSearchTimer = setTimeout(() => {
+    clientSearchTimer = null;
+    void loadClients({ reset: true });
+  }, 250);
 }
 
 export function openCreateClientModal() {

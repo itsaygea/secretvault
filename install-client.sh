@@ -7,10 +7,10 @@
 #
 # Supply-chain hardening (SV-AUD-012): for a verified install, export
 #   SECRETVAULT_RELEASE_TAG=<git tag or 40-char commit SHA>
-#   SECRETVAULT_TARBALL_SHA256=<sha256 of the tag's source tarball>
-# The installer then fetches that immutable ref (never mutable `main`) and
-# verifies the SHA-256 before building, failing closed on any mismatch.
-# Without both values it falls back to `main` and prints a warning.
+#   SECRETVAULT_TARBALL_SHA256=<sha256 of the source tarball>
+# A 40-char commit SHA is immutable when git is available. Mutable refs and
+# archive downloads require the checksum; without either value this falls back
+# to `main` and prints a warning.
 # ==============================================================================
 
 set -euo pipefail
@@ -96,12 +96,26 @@ main() {
     echo -e "${GREEN}Fetching immutable release ref '${RELEASE_REF}'.${RESET}"
   fi
 
-  if command -v git &>/dev/null; then
+  # A supplied checksum takes precedence over the transport. This prevents the
+  # git path from silently ignoring SECRETVAULT_TARBALL_SHA256.
+  if [ -n "$EXPECTED_SHA256" ]; then
+    echo -e "${CYAN}Downloading and verifying repository archive...${RESET}"
+    mkdir -p "$TMP_DIR"
+    TARBALL="$(mktemp)"
+    trap 'rm -f "$TARBALL"; rm -rf "$TMP_DIR"' EXIT
+    curl -fsSL "https://github.com/itsaygea/secretvault/archive/${ARCHIVE_REF}.tar.gz" -o "$TARBALL"
+    verify_sha256 "$TARBALL" "$EXPECTED_SHA256"
+    tar -xz -C "$TMP_DIR" --strip-components=1 -f "$TARBALL"
+    rm -f "$TARBALL"
+  elif command -v git &>/dev/null; then
     echo -e "${CYAN}Cloning repository...${RESET}"
     if printf '%s' "$RELEASE_REF" | grep -Eq '^[0-9a-f]{40}$'; then
       git clone --depth 1 https://github.com/itsaygea/secretvault.git "$TMP_DIR" &>/dev/null
       git -C "$TMP_DIR" fetch --depth 1 origin "$RELEASE_REF" &>/dev/null
       git -C "$TMP_DIR" checkout "$RELEASE_REF" &>/dev/null
+    elif [ "$RELEASE_REF" != "main" ]; then
+      echo -e "${RED}Mutable release ref '${RELEASE_REF}' requires SECRETVAULT_TARBALL_SHA256 — refusing to install unverified.${RESET}" >&2
+      exit 1
     else
       git clone --depth 1 --branch "$RELEASE_REF" https://github.com/itsaygea/secretvault.git "$TMP_DIR" &>/dev/null
     fi
@@ -148,6 +162,10 @@ main() {
 
   echo -e "${GREEN}✓ Environment ready. Launching setup...${RESET}\n"
   if [ -e /dev/tty ]; then
+    if [ "${SECRETVAULT_NON_INTERACTIVE:-0}" = "1" ]; then
+      echo -e "${GREEN}✓ Non-interactive update complete; existing local credentials were not changed.${RESET}"
+      return 0
+    fi
     if command -v secretvault &>/dev/null; then
       secretvault setup "$@" < /dev/tty
     elif command -v secretvault-mcp &>/dev/null; then
@@ -156,6 +174,10 @@ main() {
       node packages/mcp-server/dist/index.js setup "$@" < /dev/tty
     fi
   else
+    if [ "${SECRETVAULT_NON_INTERACTIVE:-0}" = "1" ]; then
+      echo -e "${GREEN}✓ Non-interactive update complete; existing local credentials were not changed.${RESET}"
+      return 0
+    fi
     if command -v secretvault &>/dev/null; then
       secretvault setup "$@"
     elif command -v secretvault-mcp &>/dev/null; then
@@ -167,4 +189,3 @@ main() {
 }
 
 main "$@"
-

@@ -6,12 +6,58 @@ import { closeModal, openModal, promptConfirmAction } from "../dialog.js";
 import { setResourceState, getResourceState } from "../state.js";
 import { loadAdminStats } from "./users.js";
 
-function renderSecretsTable(filtered, tbody) {
-  if (!Array.isArray(filtered) || filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">No secrets found in this environment. Click "+ Add New Secret".</td></tr>`;
+const SECRET_PAGE_SIZE = 25;
+const secretView = {
+  cursor: null,
+  nextCursor: null,
+  cursorHistory: [],
+  search: "",
+  environment: "all",
+};
+let secretSearchTimer = null;
+
+function syncSecretFilters() {
+  const searchInput = document.getElementById("search-secrets");
+  if (searchInput) secretView.search = String(searchInput.value || "").trim().slice(0, 128);
+
+  const filterSelect = document.getElementById("filter-secret-env");
+  if (filterSelect) secretView.environment = filterSelect.value || "all";
+}
+
+function renderSecretsPagination(itemCount) {
+  const status = document.getElementById("secrets-page-status");
+  const previousButton = document.querySelector('[data-action="previous-secrets-page"]');
+  const nextButton = document.querySelector('[data-action="next-secrets-page"]');
+  const loading = getResourceState("secrets").loading;
+  const pageNumber = secretView.cursorHistory.length + 1;
+
+  if (status) {
+    if (loading) {
+      status.textContent = "Loading secrets…";
+    } else if (itemCount === 0) {
+      status.textContent = "No matching secrets.";
+    } else {
+      const countLabel = `${itemCount} secret${itemCount === 1 ? "" : "s"}`;
+      status.textContent = `Page ${pageNumber} · ${countLabel}${secretView.nextCursor ? " · more available" : ""}`;
+    }
+  }
+
+  if (previousButton) {
+    previousButton.disabled = loading || secretView.cursorHistory.length === 0;
+    previousButton.setAttribute("aria-disabled", String(previousButton.disabled));
+  }
+  if (nextButton) {
+    nextButton.disabled = loading || !secretView.nextCursor;
+    nextButton.setAttribute("aria-disabled", String(nextButton.disabled));
+  }
+}
+
+function renderSecretsTable(secrets, tbody) {
+  if (!Array.isArray(secrets) || secrets.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">No matching secrets. Click "+ Add New Secret" to create one.</td></tr>`;
     return;
   }
-  tbody.innerHTML = filtered
+  tbody.innerHTML = secrets
     .map((s) => {
       const sName = escapeHtml(s.name);
       const sDisplayName = escapeHtml(s.display_name || s.name);
@@ -52,20 +98,65 @@ function renderSecretsTable(filtered, tbody) {
     .join("");
 }
 
-export async function loadSecrets() {
+export async function loadSecrets({ reset = true, direction = "current" } = {}) {
   const tbody = document.getElementById("secrets-table-body");
   if (!tbody) return;
-  setResourceState("secrets", { loading: true, error: null });
 
-  const result = await apiGet("/v1/secrets", { resourceKey: "secrets" });
+  syncSecretFilters();
+
+  const previousView = {
+    cursor: secretView.cursor,
+    nextCursor: secretView.nextCursor,
+    cursorHistory: [...secretView.cursorHistory],
+  };
+
+  if (reset) {
+    secretView.cursor = null;
+    secretView.nextCursor = null;
+    secretView.cursorHistory = [];
+  } else if (direction === "next" && secretView.nextCursor) {
+    secretView.cursorHistory.push(secretView.cursor);
+    secretView.cursor = secretView.nextCursor;
+    secretView.nextCursor = null;
+  } else if (direction === "previous" && secretView.cursorHistory.length > 0) {
+    secretView.cursor = secretView.cursorHistory.pop();
+    secretView.nextCursor = null;
+  }
+
+  setResourceState("secrets", { loading: true, error: null });
+  renderSecretsPagination(0);
+
+  const params = new URLSearchParams({ page_size: String(SECRET_PAGE_SIZE) });
+  if (secretView.cursor) params.set("cursor", secretView.cursor);
+  if (secretView.search) params.set("search", secretView.search);
+  if (secretView.environment !== "all") params.set("environment", secretView.environment);
+
+  const result = await apiGet(`/v1/secrets?${params.toString()}`, { resourceKey: "secrets" });
   if (result.error) {
+    secretView.cursor = previousView.cursor;
+    secretView.nextCursor = previousView.nextCursor;
+    secretView.cursorHistory = previousView.cursorHistory;
     setResourceState("secrets", { loading: false, error: result.error.message });
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color: var(--accent-rose);">Failed to load secrets: ${escapeHtml(result.error.message)}</td></tr>`;
+    renderSecretsPagination(0);
     return;
   }
 
-  const secretsList = extractList(result.data);
-  setState({ secretsList });
+  const responsePage = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+    ? result.data
+    : { data: result.data };
+  const secretsList = extractList(responsePage);
+  secretView.nextCursor = typeof responsePage.next_cursor === "string" && responsePage.next_cursor.length > 0
+    ? responsePage.next_cursor
+    : null;
+  setState({
+    secretsList,
+    secretPagination: {
+      pageSize: SECRET_PAGE_SIZE,
+      page: secretView.cursorHistory.length + 1,
+      hasNext: Boolean(secretView.nextCursor),
+    },
+  });
   setResourceState("secrets", { loading: false, error: null });
 
   const tagsSet = new Set();
@@ -77,10 +168,17 @@ export async function loadSecrets() {
   setState({ allUniqueTags: Array.from(tagsSet).sort() });
   updateTagsUi();
 
-  const filterSelect = document.getElementById("filter-secret-env");
-  const filterEnv = filterSelect?.value || "all";
-  const filtered = filterEnv === "all" ? secretsList : secretsList.filter((s) => (s.environment || "development").toLowerCase() === filterEnv);
-  renderSecretsTable(filtered, tbody);
+  renderSecretsTable(secretsList, tbody);
+  renderSecretsPagination(secretsList.length);
+}
+
+export function handleSecretSearchInput(value) {
+  secretView.search = String(value || "").trim().slice(0, 128);
+  if (secretSearchTimer) clearTimeout(secretSearchTimer);
+  secretSearchTimer = setTimeout(() => {
+    secretSearchTimer = null;
+    void loadSecrets({ reset: true });
+  }, 250);
 }
 
 export function updateTagsUi() {

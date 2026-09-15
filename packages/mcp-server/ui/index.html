@@ -416,6 +416,38 @@
     }
     .form-input:focus, .form-select:focus { border-color: var(--accent-cyan); box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.2); }
 
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+
+    /* ── Secret list controls ── */
+    .secrets-toolbar {
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .secrets-search { flex: 1 1 18rem; min-width: 14rem; }
+    .secrets-pagination {
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      flex-wrap: wrap; padding-top: 1rem; margin-top: 0.25rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .secrets-page-status { color: var(--text-muted); font-size: 0.8rem; min-height: 1.2rem; }
+    .secrets-pagination-actions { display: flex; gap: 0.5rem; }
+    .btn:disabled { cursor: not-allowed; opacity: 0.45; transform: none; }
+    .clients-search { flex: 1 1 18rem; min-width: 14rem; }
+    .clients-toolbar {
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .clients-pagination {
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      flex-wrap: wrap; padding-top: 1rem; margin-top: 0.25rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .clients-page-status { color: var(--text-muted); font-size: 0.8rem; min-height: 1.2rem; }
+    .clients-pagination-actions { display: flex; gap: 0.5rem; }
+
     /* ── Toast Container ── */
     #toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 120; display: flex; flex-direction: column; gap: 0.5rem; }
     .toast {
@@ -442,6 +474,20 @@
       transition: top 0.15s ease;
     }
     .skip-link:focus { top: 0.5rem; }
+
+    /* ── Floating navigation ── */
+    .back-to-top {
+      position: fixed; right: max(1rem, env(safe-area-inset-right));
+      bottom: max(1rem, env(safe-area-inset-bottom)); z-index: 90;
+      min-width: 44px; min-height: 44px; justify-content: center;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transform: translateY(0.75rem);
+      transition: opacity 0.18s ease, visibility 0.18s ease, transform 0.18s ease;
+    }
+    .back-to-top.is-visible {
+      opacity: 1; visibility: visible; pointer-events: auto; transform: translateY(0);
+    }
 
     /* ── Minimum touch targets for interactive controls (SV-061) ── */
     .nav-tab { min-height: 44px; }
@@ -640,7 +686,9 @@
             <h2 class="card-title">Secret Management</h2>
             <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Values are encrypted with AES-256-GCM. Human reveals require step-up authentication.</p>
           </div>
-          <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+          <div class="secrets-toolbar">
+            <label class="sr-only" for="search-secrets">Search secret names</label>
+            <input type="search" id="search-secrets" class="form-input secrets-search" data-input-action="search-secrets" placeholder="Search secret names…" autocomplete="off" maxlength="128">
             <select id="filter-secret-env" class="form-input" data-change-action="reload-secrets" style="padding: 0.35rem 0.6rem; font-size: 0.82rem; width: auto;">
               <option value="all">🌐 All Environments</option>
               <option value="production">🟢 Production</option>
@@ -665,6 +713,13 @@
             <!-- Rendered by JS -->
           </tbody>
         </table>
+        <div class="secrets-pagination" aria-label="Secret list pagination">
+          <span id="secrets-page-status" class="secrets-page-status" aria-live="polite"></span>
+          <div class="secrets-pagination-actions">
+            <button type="button" class="btn btn-secondary btn-sm" data-action="previous-secrets-page" disabled>Previous</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-action="next-secrets-page" disabled>Next</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -677,6 +732,11 @@
             <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Scoped linking keys (<code class="code-tag">sv_...</code>) for Claude Code, mobile clients, and CI/CD pipelines.</p>
           </div>
           <button class="btn btn-primary" data-action="open-create-client">+ Register Client App</button>
+        </div>
+
+        <div class="clients-toolbar">
+          <label class="sr-only" for="search-clients">Search client applications</label>
+          <input type="search" id="search-clients" class="form-input clients-search" data-input-action="search-clients" placeholder="Search client applications…" autocomplete="off" maxlength="128">
         </div>
 
         <table>
@@ -693,6 +753,13 @@
             <!-- Rendered by JS -->
           </tbody>
         </table>
+        <div class="clients-pagination" aria-label="Client application pagination">
+          <span id="clients-page-status" class="clients-page-status" aria-live="polite"></span>
+          <div class="clients-pagination-actions">
+            <button type="button" class="btn btn-secondary btn-sm" data-action="previous-clients-page" disabled>Previous</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-action="next-clients-page" disabled>Next</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1525,6 +1592,11 @@
 
   <!-- Toast Container -->
   <div id="toast-container" role="region" aria-label="Notifications" aria-live="polite" aria-atomic="false"></div>
+
+  <button type="button" id="back-to-top" class="btn btn-secondary back-to-top" data-action="back-to-top" aria-label="Back to top" aria-hidden="true" tabindex="-1" title="Back to top">
+    <span aria-hidden="true">↑</span>
+    <span>Top</span>
+  </button>
 
   <script type="module" src="app.js"></script>
 </body>

@@ -68,13 +68,13 @@
           }
         }
       ],
-      "description": "Proxy contract: authenticate with Authorization: Bearer <linking_key>; the profile controls credential injection, allowed methods, path prefixes, destination origin, and DNS pinning. Caller query parameters pass through as query data. Caller Host, Authorization, and Connection headers are not trusted; response bodies are opaque upstream data and sensitive response headers are stripped.",
+      "description": "Proxy contract: authenticate with Authorization: Bearer <short-lived proxy access token> (or a linking key during compatibility migration); the profile controls credential injection, allowed methods, path prefixes, destination origin, and DNS pinning. Caller query parameters pass through as query data. Caller Host, Authorization, and Connection headers are not trusted; response bodies are bounded and scanned for reflected injected credentials before return, while sensitive response headers are stripped.",
       "x-secretvault-contract": {
         "request_headers": "Caller headers pass through except Host, Authorization, and Connection; SecretVault injects the profile credential.",
         "query": "Query parameters pass through unchanged as upstream query data.",
         "redirects": "Redirects are not followed by SecretVault.",
-        "response": "Status, non-sensitive headers, and opaque upstream body are returned; upstream body sanitization is not claimed.",
-        "errors": "SecretVault-generated errors use the ErrorEnvelope schema; upstream responses retain their upstream status/body semantics."
+        "response": "Status, non-sensitive headers, and a bounded upstream body are returned only after value-based credential-reflection scanning. Supported compressed bodies are decompressed for scanning and then returned in their original encoding.",
+        "errors": "SecretVault-generated errors use the ErrorEnvelope schema; upstream error statuses are preserved with a stable envelope, and successful responses that cannot be safely scanned or contain injected credential material return a 502 ErrorEnvelope."
       },
       "get": {
         "operationId": "proxyGet",
@@ -722,6 +722,51 @@
         ]
       }
     },
+    "/v1/client/token": {
+      "post": {
+        "operationId": "exchangeProxyAccessToken",
+        "summary": "Exchange a client linking key for a short-lived proxy token",
+        "description": "The caller must use a proxy-capable client linking key. The returned bearer token is client-bound, expires after 15 minutes, and is valid only for proxy requests. Only its SHA-256 digest is stored.",
+        "tags": [
+          "Clients"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^proxy:.+$"
+                    },
+                    "description": "Optional subset of the client's proxy scopes."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/Json"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-sv-auth": "scope"
+      }
+    },
     "/v1/clients": {
       "get": {
         "operationId": "listClients",
@@ -761,6 +806,16 @@
               "minimum": 1,
               "maximum": 200
             }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Case-insensitive search across client application names."
           }
         ]
       },
@@ -1070,6 +1125,27 @@
               "minimum": 1,
               "maximum": 200
             }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Case-insensitive search across canonical and display secret names."
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "pattern": "^[a-zA-Z0-9_.-]+$"
+            },
+            "description": "Exact environment metadata filter."
           }
         ]
       },
@@ -1727,7 +1803,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "SecretVault linking key or session token"
+        "bearerFormat": "SecretVault proxy access token, linking key, or session token"
       }
     },
     "parameters": {

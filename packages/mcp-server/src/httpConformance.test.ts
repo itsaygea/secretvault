@@ -185,11 +185,13 @@ beforeAll(async () => {
     if (req.url?.startsWith("/stream")) {
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.write("first");
-      setTimeout(() => res.end("second"), 250);
+      setTimeout(() => res.end("second"), 10);
       return;
     }
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, authorization: captured.authorization, trace: captured.trace, path: captured.path }));
+    // Confirm injection without reflecting the credential into the caller's
+    // response body; the proxy must treat upstream responses as untrusted.
+    res.end(JSON.stringify({ ok: true, authorization_present: Boolean(captured.authorization), trace: captured.trace, path: captured.path }));
   });
   upstreamBaseUrl = await listen(upstreamServer);
 
@@ -303,6 +305,29 @@ describe("SecretVault public HTTP and MCP conformance", () => {
     expect(body.error).toMatchObject({ code: "FORBIDDEN", status: 403 });
   });
 
+  it("exchanges a client key for a proxy-only short-lived token", async () => {
+    const exchange = await jsonRequest("/v1/client/token", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${mainKey}`, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(exchange.response.status).toBe(200);
+    expect(exchange.body.token_type).toBe("Bearer");
+    expect(exchange.body.expires_in).toBe(900);
+    expect(exchange.body.access_token).toMatch(/^svt_[A-Za-z0-9_-]{43}$/);
+    expect(exchange.body.access_token).not.toBe(mainKey);
+
+    const proxy = await jsonRequest("/proxy/github/v1/resource", {
+      headers: { Authorization: `Bearer ${exchange.body.access_token}` },
+    });
+    expect(proxy.response.status).toBe(200);
+
+    const management = await jsonRequest("/api/me", {
+      headers: { Authorization: `Bearer ${exchange.body.access_token}` },
+    });
+    expect(management.response.status).toBe(403);
+  });
+
   it("injects the profile credential and forwards safe request data to a mock upstream", async () => {
     const { response, body } = await jsonRequest("/proxy/github/echo?query=1", {
       headers: {
@@ -311,26 +336,25 @@ describe("SecretVault public HTTP and MCP conformance", () => {
       },
     });
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ ok: true, authorization: "Bearer upstream-secret", trace: "trace-1", path: "/echo?query=1" });
+    expect(body).toMatchObject({ ok: true, authorization_present: true, trace: "trace-1", path: "/echo?query=1" });
   });
 
-  it("streams upstream response data without buffering the full body", async () => {
-    const firstChunk = await new Promise<{ text: string; elapsed: number }>((resolve, reject) => {
+  it("inspects successful upstream response data before returning it", async () => {
+    const responseBody = await new Promise<{ text: string; elapsed: number }>((resolve, reject) => {
       const started = Date.now();
       const request = httpRequest(`${appBaseUrl}/proxy/github/stream`, {
         headers: { Authorization: `Bearer ${mainKey}` },
       }, (response: IncomingMessage) => {
-        response.once("data", (chunk: Buffer) => {
-          resolve({ text: chunk.toString(), elapsed: Date.now() - started });
-          response.resume();
-        });
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => resolve({ text: Buffer.concat(chunks).toString(), elapsed: Date.now() - started }));
         response.on("error", reject);
       });
       request.once("error", reject);
       request.end();
     });
-    expect(firstChunk.text).toBe("first");
-    expect(firstChunk.elapsed).toBeLessThan(200);
+    expect(responseBody.text).toBe("firstsecond");
+    expect(responseBody.elapsed).toBeGreaterThanOrEqual(5);
   });
 
   it("turns an upstream timeout into the standard proxy error envelope", async () => {

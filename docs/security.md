@@ -17,10 +17,10 @@ SecretVault is designed specifically to prevent credential exposure in AI agent 
 SecretVault acts as a credentialed proxy gateway between client applications/agents and upstream HTTP APIs.
 
 - **Egress Header Injection**: SecretVault injects authorized credentials into the headers of outbound requests dispatched to configured upstream target URLs.
-- **Upstream Response Trust Boundary**: Once an outbound request leaves SecretVault, the response returned by the target service enters the upstream service's trust boundary. SecretVault does not claim universal AI response-body regex sanitization for arbitrary third-party payloads.
+- **Upstream Response Trust Boundary**: Once an outbound request leaves SecretVault, the response returned by the target service enters the upstream service's trust boundary. SecretVault performs a bounded value-based scan before returning successful bodies; this is a credential-reflection control, not universal semantic sanitization of arbitrary third-party payloads.
 - **Reflection Risk & Mitigations**:
   - *Risk*: An upstream API returning its own echo/debug response containing reflected credential data.
-  - *Mitigation*: Service profiles require HTTPS by default, restrict non-admin destination creation to exact configured origins, reject local/private destinations unless explicitly enabled by an administrator, pin the DNS result used by each upstream connection, validate the canonical origin before dispatch, and record the calling client. Transparent response-body sanitization remains outside the generic proxy guarantee.
+  - *Mitigation*: Service profiles require HTTPS by default, restrict non-admin destination creation to exact configured origins, reject local/private destinations unless explicitly enabled by an administrator, pin the DNS result used by each upstream connection, validate the canonical origin before dispatch, and record the calling client. Successful bodies are bounded, decompressed for supported encodings, scanned for the injected credential renderings, and blocked with a SecretVault error if reflection is detected or the body cannot be safely inspected. The scan cannot detect every transformation an upstream might apply to a credential.
 
 ---
 
@@ -56,6 +56,27 @@ Linking keys (`sv_<48-hex>`) authenticate client applications and AI agents with
 - **Atomic regeneration**: Regeneration writes the new key, increments `key_version`, and invalidates the prior key in one conditional update. Concurrent regenerations are safe — only the winner's key is persisted; the loser gets a `409` and retries, so at most one key is ever valid.
 - **Client Identity**: Bound to `(user_id, client_id)` pairs in `client_applications`.
 - **Granular Revocation**: Revoking a client application revokes its specific linking key instantly without affecting other integrations.
+
+## Short-Lived Proxy Access Tokens
+
+Proxy applications should use the client-bound access-token seam rather than
+send their long-lived linking key on every upstream request:
+
+- `POST /v1/client/token` exchanges a proxy-capable client linking key for an
+  `svt_1234567890abcdef...` bearer token with a 15-minute lifetime.
+- Only the SHA-256 digest is stored. The token is bound to the client id,
+  current client key version, account session epoch, and an explicit proxy
+  scope set.
+- Proxy access tokens are accepted only by `/proxy/...`; they cannot call the
+  management API or runner secret-resolution route.
+- Client-key regeneration, client deletion, scope reduction, password/factor
+  session revocation, and account deletion invalidate existing access tokens.
+- `@secretvault/client` exchanges and caches these tokens automatically, refreshes
+  before expiry, and retries one replayable request after a server-side token
+  revocation. Streaming request bodies are never replayed.
+
+The linking key remains a bootstrap credential and should be kept in the local
+credential store or deployment secret manager, never committed or printed.
 
 ---
 
@@ -94,11 +115,10 @@ Tenant isolation is enforced **in the database**, not only in application query 
 
 - **Runtime role `sv_runtime` (NOLOGIN / NOBYPASSRLS).** Authenticated application traffic is switched into `sv_runtime` by PostgREST per request. Because it cannot bypass RLS and the tenant tables have `FORCE ROW LEVEL SECURITY`, the per-request tenant claim is the real boundary.
 - **Per-request tenant JWT (internal-only).** For each authenticated request the app mints a short-lived (60s) HS256 JWT carrying `{ role: "sv_runtime", tenant_user_id, client_id, is_admin }`, stamped onto the shared PostgREST client's requests via an `AsyncLocalStorage`-bound `fetch`. This token is **never returned to clients**; it is distinct from the session HMAC token. PostgREST exposes it as the `request.jwt.claims` GUC.
-- **Tenant RLS policies.** `secrets`, `access_logs`, `service_profiles`, `client_applications`, `webauthn_credentials`, `totp_secrets`, `totp_pending_enrollments`, `totp_backup_codes` admit a row only when `user_id = current_tenant_id()` (or `is_admin`). Application `.eq("user_id")` filters remain as defense-in-depth, not the boundary.
-- **Non-tenant tables.** `users` (global auth lookup by username), `system_settings`, and `master_key_rotations` are scoped to `service_role` only (used by the pre-auth/global and admin paths); `sv_runtime` has no grant on them. `rate_limit_buckets` is `sv_runtime`-only and keyed by bucket.
+- **Tenant RLS policies.** `secrets`, `access_logs`, `service_profiles`, `client_applications`, `webauthn_credentials`, `totp_secrets`, `totp_pending_enrollments`, `totp_backup_codes`, and `proxy_access_tokens` admit a row only when `user_id = current_tenant_id()` (or `is_admin`). Application `.eq("user_id")` filters remain as defense-in-depth, not the boundary.
+- **Non-tenant tables.** `users` retains a service-role pre-auth policy for username lookup, while authenticated `sv_runtime` traffic is limited to the current user (or all rows for an admin). `system_settings` is service-role-readable on the public pre-auth path and admin-only under `sv_runtime`; `master_key_rotations` remains service-role/CLI-only. `proxy_access_tokens` is an internal digest lookup table resolved through a narrow service-role RPC before tenant context exists, with tenant-scoped runtime access for issuance and revocation. `rate_limit_buckets` is `sv_runtime`-only and keyed by independent account and source-IP buckets.
 - **Least privilege + revokes.** Every policy carries an explicit `TO` clause; `PUBLIC`, `anon`, and `authenticated` are revoked across the schema.
 - **Network isolation (bundled stack).** Two Docker networks: `backend` (postgres + the `migrate` one-shot) and `frontend` (postgrest, postgrest-proxy, the app). PostgREST bridges both. The runtime app has **no direct `SECRETVAULT_DATABASE_URL`** — it reaches the database only through PostgREST, so a compromised app container cannot bypass RLS.
 - **Per-install credentials.** `install-server.sh` generates the PostgREST↔Postgres `authenticator` password and the JWT secret per install; there is no fixed bundled authenticator password.
 - **Threat boundary.** PostgREST is a trusted, in-process mediator on an isolated network. The JWT secret (`SECRETVAULT_PGRST_JWT_SECRET`) must be protected: anyone holding it can mint tenant tokens. On Supabase Cloud, where `service_role` is provisioned `BYPASSRLS` out-of-band, isolation depends on the `sv_runtime` role existing there and the app minting per-request tenant tokens into it.
 - **Proof.** A real PostgreSQL/PostgREST integration test (`ci/tenant-isolation.mjs`, run in the CI `docker-e2e` job) mints two tenant tokens and asserts cross-tenant SELECT/INSERT/UPDATE/DELETE are denied, including that an unfiltered SELECT returns only the caller's rows.
-

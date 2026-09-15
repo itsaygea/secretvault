@@ -17,11 +17,14 @@ beforeAll(() => {
 
 describe("audit event sanitization", () => {
   it("redacts credential-like query parameters", () => {
-    const sanitized = sanitizeAuditCaller("proxy:GET:/debug?token=secret&ok=yes&api_key=abc");
+    const sanitized = sanitizeAuditCaller("proxy:GET:/debug?token=secret&ok=yes&api_key=abc&access_token=refresh-value&client_secret=hidden");
     expect(sanitized).toContain("token=%5BREDACTED%5D");
     expect(sanitized).toContain("api_key=%5BREDACTED%5D");
+    expect(sanitized).toContain("access_token=%5BREDACTED%5D");
+    expect(sanitized).toContain("client_secret=%5BREDACTED%5D");
     expect(sanitized).toContain("ok=yes");
-    expect(sanitized).not.toContain("secret");
+    expect(sanitized).not.toContain("refresh-value");
+    expect(sanitized).not.toContain("hidden");
   });
 
   it("creates an unknown critical event and finalizes the same row", async () => {

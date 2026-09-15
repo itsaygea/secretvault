@@ -226,15 +226,20 @@ export interface RateLimitStore {
  *  instances built over the SAME `MemoryRateLimitStore` enforce jointly — this
  *  is how the two-replica property is asserted without a live database. */
 export class MemoryRateLimitStore implements RateLimitStore {
-  private counts = new Map<string, { count: number; cooldownUntil: number }>();
+  private counts = new Map<string, { count: number; windowStart: number; cooldownUntil: number }>();
 
-  async charge(bucketKey: string, _windowStart: number): Promise<ChargeResult> {
+  async charge(bucketKey: string, windowStart: number): Promise<ChargeResult> {
     const rec = this.counts.get(bucketKey);
     if (!rec) {
-      this.counts.set(bucketKey, { count: 1, cooldownUntil: 0 });
+      this.counts.set(bucketKey, { count: 1, windowStart, cooldownUntil: 0 });
       return { count: 1, cooldownUntil: 0 };
     }
-    rec.count += 1;
+    if (rec.windowStart < windowStart) {
+      rec.windowStart = windowStart;
+      rec.count = 1;
+    } else {
+      rec.count += 1;
+    }
     return { count: rec.count, cooldownUntil: rec.cooldownUntil };
   }
 
@@ -243,7 +248,7 @@ export class MemoryRateLimitStore implements RateLimitStore {
     if (rec) {
       if (cooldownUntil > rec.cooldownUntil) rec.cooldownUntil = cooldownUntil;
     } else {
-      this.counts.set(bucketKey, { count: 0, cooldownUntil });
+      this.counts.set(bucketKey, { count: 0, windowStart: 0, cooldownUntil });
     }
   }
 
@@ -325,6 +330,8 @@ export const DEFAULT_LIMITS = {
   setup: { windowMs: 60_000, maxRequests: 5, cooldownMs: 10_000, maxCooldownMs: 15 * 60_000 },
   // Stricter per-user guessing surface.
   totp: { windowMs: 60_000, maxRequests: 5, cooldownMs: 15_000, maxCooldownMs: 30 * 60_000 },
+  // Token exchange is credential-minting and gets its own account/IP budget.
+  token: { windowMs: 60_000, maxRequests: 10, cooldownMs: 5_000, maxCooldownMs: 5 * 60_000 },
 } as const;
 
 export type RateLimitScope = keyof typeof DEFAULT_LIMITS;
@@ -355,11 +362,37 @@ export class RateLimiter {
   async check(parts: RateLimitKeyParts, options: RateLimitOptions): Promise<RateLimitResult> {
     const now = this.clock.now();
     const windowStart = Math.floor(now / options.windowMs) * options.windowMs;
-    // Identity participates in the key so a per-user limit cannot be diluted by
-    // omitting it; absent identity, the IP alone bounds the caller.
-    const identity = parts.identity ?? "anon";
-    const bucketKey = `${parts.scope}:${parts.ip}:${identity}:${windowStart}`;
+    // Charge independent stable buckets. Rotating IPs cannot dilute an
+    // account limit, and rotating account names cannot dilute an IP limit.
+    // With no identity, the source-IP bucket is the only safe key.
+    const dimensions = parts.identity === undefined
+      ? [{ kind: "ip", value: parts.ip }]
+      : [
+          { kind: "identity", value: parts.identity },
+          { kind: "ip", value: parts.ip },
+        ];
+    const results: RateLimitResult[] = [];
+    for (const dimension of dimensions) {
+      const bucketKey = `${parts.scope}:${dimension.kind}:${dimension.value}`;
+      const result = await this.checkBucket(bucketKey, now, windowStart, options);
+      results.push(result);
+      if (!result.allowed) return result;
+    }
+    return {
+      allowed: true,
+      remaining: Math.min(...results.map((result) => result.remaining)),
+      retryAfterSeconds: 0,
+      bucketKey: results.map((result) => result.bucketKey).join("+") || `${parts.scope}:ip:${parts.ip}`,
+      storeError: false,
+    };
+  }
 
+  private async checkBucket(
+    bucketKey: string,
+    now: number,
+    windowStart: number,
+    options: RateLimitOptions,
+  ): Promise<RateLimitResult> {
     let charge: ChargeResult;
     try {
       charge = await this.store.charge(bucketKey, windowStart);

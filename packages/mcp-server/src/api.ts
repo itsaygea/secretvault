@@ -15,7 +15,8 @@ import {
   validateTags,
   validationErrorResponse,
 } from "./validation.js";
-import { clampPageSize, decodeCursor, encodeCursor, escapePostgrestValue, paginateQuery, type PaginationParams } from "./pagination.js";
+import { clampPageSize, decodeCursor, encodeCursor, escapePostgrestLike, escapePostgrestValue, paginateQuery, type PaginationParams } from "./pagination.js";
+import { authenticateProxyAccessToken } from "./proxyTokens.js";
 
 // ── Auth helpers ────────────────────────────────────────────────────
 
@@ -80,13 +81,18 @@ export function getAuthHeader(req: { headers: Record<string, string | string[] |
   return auth.slice(7);
 }
 
-// Resolves auth from either a session token or a linking key
+// Resolves auth from a session token, a long-lived linking key, or a short-lived
+// client-bound proxy token.
 export async function resolveAuthContext(
   supabase: SupabaseClient<Database, "secretvault">,
   req: { headers: Record<string, string | string[] | undefined> },
 ): Promise<Principal | null> {
   const raw = getAuthHeader(req);
   if (!raw) return null;
+
+  if (raw.startsWith("svt_")) {
+    return authenticateProxyAccessToken(supabase, raw);
+  }
 
   // Try linking key first (sv_... prefix)
   if (raw.startsWith("sv_")) {
@@ -99,6 +105,8 @@ export async function resolveAuthContext(
       clientId: result.clientId ?? null,
       credentialType: "linking_key",
       scopes: normalizeScopes(result.scopes),
+      keyVersion: result.keyVersion,
+      epoch: result.sessionEpoch,
     };
   }
 
@@ -124,6 +132,7 @@ export async function resolveAuthContext(
     clientId: null,
     credentialType: "session",
     scopes: [],
+    epoch: dbEpoch,
   };
 }
 
@@ -187,6 +196,15 @@ export async function handleListSecrets(
       return { status: 400, body: { error: "Invalid cursor", code: "INVALID_CURSOR" } };
     }
     q = q.or(`name.gt.${escapePostgrestValue(decoded.after)},and(name.eq.${escapePostgrestValue(decoded.after)},id.gt.${escapePostgrestValue(decoded.tiebreaker)})`);
+  }
+
+  if (query.search) {
+    const searchPattern = escapePostgrestValue(`%${escapePostgrestLike(query.search)}%`);
+    q = q.or(`name.ilike.${searchPattern},display_name.ilike.${searchPattern}`);
+  }
+
+  if (query.environment) {
+    q = q.eq("environment", query.environment);
   }
 
   q = q.order("name").order("id");

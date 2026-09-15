@@ -191,6 +191,20 @@ export async function bumpSessionEpoch(
   supabase: SupabaseClient<Database, "secretvault">,
   userId: string,
 ): Promise<number | null> {
+  // Production clients use the atomic SQL primitive added in migration 027.
+  // The small fallback keeps isolated unit-test doubles compatible without
+  // weakening the deployed path.
+  if (typeof (supabase as any).rpc === "function") {
+    const { data, error } = await supabase.rpc("bump_session_epoch", { p_user_id: userId });
+    if (error || data === null || data === undefined) return null;
+    const next = typeof data === "number"
+      ? data
+      : Array.isArray(data)
+        ? Number((data[0] as { bump_session_epoch?: number } | undefined)?.bump_session_epoch)
+        : Number(data);
+    return Number.isFinite(next) ? next : null;
+  }
+
   const { data: user } = await supabase
     .from("users")
     .select("session_epoch")
@@ -203,6 +217,32 @@ export async function bumpSessionEpoch(
     .eq("id", userId);
   if (error) return null;
   return nextEpoch;
+}
+
+/**
+ * Security-sensitive mutations must not report success while old sessions may
+ * still be valid. Retry once for a transient database failure, then fail
+ * closed with a stable error that handlers can return without exposing DB text.
+ */
+export async function bumpSessionEpochOrThrow(
+  supabase: SupabaseClient<Database, "secretvault">,
+  userId: string,
+): Promise<number> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const epoch = await bumpSessionEpoch(supabase, userId).catch(() => null);
+    if (epoch !== null) return epoch;
+  }
+  throw new Error("SESSION_REVOCATION_UNAVAILABLE");
+}
+
+function sessionRevocationUnavailableResponse(): { status: number; body: { error: string; code: string } } {
+  return {
+    status: 503,
+    body: {
+      error: "Session revocation unavailable; operation blocked",
+      code: "SESSION_REVOCATION_UNAVAILABLE",
+    },
+  };
 }
 
 // ── Debounced last_used_at batch updater ──────────────────────────
@@ -222,7 +262,16 @@ function debouncedLastUsedUpdate(supabase: SupabaseClient<any, "secretvault">, c
       const batch = [...pendingLastUsed.entries()];
       pendingLastUsed.clear();
       for (const [id, ts] of batch) {
-        Promise.resolve(supabase.from("client_applications").update({ last_used_at: ts }).eq("id", id).then()).catch(() => {});
+        if (typeof (supabase as any).rpc === "function") {
+          Promise.resolve((supabase as any).rpc("touch_client_application_last_used", {
+            p_client_id: id,
+            p_last_used_at: ts,
+          })).catch(() => {});
+        } else {
+          // Isolated unit-test doubles predate the RPC surface. Production
+          // Supabase clients always take the narrow SECURITY DEFINER path.
+          Promise.resolve(supabase.from("client_applications").update({ last_used_at: ts }).eq("id", id).then()).catch(() => {});
+        }
       }
     }, LAST_USED_FLUSH_MS);
   }
@@ -234,17 +283,55 @@ export async function authenticateLinkingKey(
 ): Promise<{ id: string; username: string; is_admin: boolean; clientId?: string; scopes?: string[]; keyVersion?: number; sessionEpoch?: number } | null> {
   const hash = hashLinkingKey(key);
 
-  const { data: clientApp } = await supabase
-    .from("client_applications")
-    .select("id, scopes, key_version, user_id, users(id, username, is_admin, session_epoch)")
-    .eq("key_hash", hash)
-    .maybeSingle();
+  let clientApp: {
+    client_id: string;
+    user_id: string;
+    scopes: string[];
+    key_version: number;
+    username: string;
+    is_admin: boolean;
+    session_epoch: number;
+  } | null = null;
 
-  if (clientApp && clientApp.users) {
-    debouncedLastUsedUpdate(supabase, clientApp.id);
+  if (typeof (supabase as any).rpc === "function") {
+    // Production path: migration 028 exposes only the authentication
+    // projection before a tenant JWT exists. Do not fall back to a broad
+    // client_applications query if the RPC is unavailable or errors.
+    const { data, error } = await (supabase as any).rpc("authenticate_linking_key", { p_key_hash: hash });
+    if (error) return null;
+    clientApp = (Array.isArray(data) ? data[0] : data) ?? null;
+  } else {
+    // Isolated unit-test doubles predate the RPC surface.
+    const { data } = await supabase
+      .from("client_applications")
+      .select("id, scopes, key_version, user_id, users(id, username, is_admin, session_epoch)")
+      .eq("key_hash", hash)
+      .maybeSingle();
+    if (data?.users) {
+      const u = data.users as any;
+      clientApp = {
+        client_id: data.id,
+        user_id: data.user_id,
+        scopes: data.scopes ?? [],
+        key_version: data.key_version ?? 1,
+        username: u.username,
+        is_admin: u.is_admin,
+        session_epoch: u.session_epoch ?? 0,
+      };
+    }
+  }
 
-    const u = clientApp.users as any;
-    return { id: u.id, username: u.username, is_admin: u.is_admin, clientId: clientApp.id, scopes: clientApp.scopes ?? [], keyVersion: clientApp.key_version ?? 1, sessionEpoch: u.session_epoch ?? 0 };
+  if (clientApp) {
+    debouncedLastUsedUpdate(supabase, clientApp.client_id);
+    return {
+      id: clientApp.user_id,
+      username: clientApp.username,
+      is_admin: clientApp.is_admin,
+      clientId: clientApp.client_id,
+      scopes: clientApp.scopes ?? [],
+      keyVersion: clientApp.key_version ?? 1,
+      sessionEpoch: clientApp.session_epoch ?? 0,
+    };
   }
 
   const { data: user } = await supabase
@@ -512,11 +599,15 @@ export async function handleAdminResetUserPassword(
   const { data: targetUser } = await supabase.from("users").select("id, username").eq("id", targetUserId).maybeSingle();
   if (!targetUser) return { status: 404, body: { error: "User not found" } };
 
+  try {
+    await bumpSessionEpochOrThrow(supabase, targetUserId);
+  } catch {
+    return sessionRevocationUnavailableResponse();
+  }
+
   const hash = await bcrypt.hash(validatedPassword, BCRYPT_ROUNDS);
   const { error } = await supabase.from("users").update({ password_hash: hash }).eq("id", targetUserId);
   if (error) return internalErrorResponse();
-
-  await bumpSessionEpoch(supabase, targetUserId);
 
   // Actor is the acting admin; target user is recorded in metadata so the
   // user_id column reflects who performed the reset, not who was reset.
@@ -540,10 +631,14 @@ export async function handleAdminResetUser2FA(
   const { data: targetUser } = await supabase.from("users").select("id, username").eq("id", targetUserId).maybeSingle();
   if (!targetUser) return { status: 404, body: { error: "User not found" } };
 
+  try {
+    await bumpSessionEpochOrThrow(supabase, targetUserId);
+  } catch {
+    return sessionRevocationUnavailableResponse();
+  }
+
   await supabase.from("webauthn_credentials").delete().eq("user_id", targetUserId);
   await wipeUserTotpState(supabase, targetUserId);
-
-  await bumpSessionEpoch(supabase, targetUserId);
 
   await recordAuditEvent(supabase, {
     userId: actor?.userId ?? null,
@@ -626,11 +721,15 @@ export async function handleChangePassword(
   const valid = await bcrypt.compare(current_password, user.password_hash);
   if (!valid) return { status: 401, body: { error: "Current password is incorrect" } };
 
+  try {
+    await bumpSessionEpochOrThrow(supabase, userId);
+  } catch {
+    return sessionRevocationUnavailableResponse();
+  }
+
   const hash = await bcrypt.hash(new_password, BCRYPT_ROUNDS);
   const { error } = await supabase.from("users").update({ password_hash: hash }).eq("id", userId);
   if (error) return internalErrorResponse();
-
-  await bumpSessionEpoch(supabase, userId);
   void recordAuditEvent(supabase, {
     userId,
     secretName: "account",
@@ -700,9 +799,9 @@ export async function handleGetMe(
 export async function handleListClients(
   supabase: SupabaseClient<any, "secretvault">,
   userId: string,
-  query?: { cursor?: string | null; pageSize?: number },
+  query?: { cursor?: string | null; pageSize?: number; search?: string | null },
 ): Promise<{ status: number; body: unknown }> {
-  const { clampPageSize, decodeBeforeCursor, encodeBeforeCursor, escapePostgrestValue, paginateQuery } = await import("./pagination.js");
+  const { clampPageSize, decodeBeforeCursor, encodeBeforeCursor, escapePostgrestLike, escapePostgrestValue, paginateQuery } = await import("./pagination.js");
   const pageSize = clampPageSize(query?.pageSize);
   let q = supabase
     .from("client_applications")
@@ -716,6 +815,11 @@ export async function handleListClients(
       return { status: 400, body: { error: "Invalid cursor", code: "INVALID_CURSOR" } };
     }
     q = q.or(`created_at.lt.${escapePostgrestValue(decoded.before)},and(created_at.eq.${escapePostgrestValue(decoded.before)},id.lt.${escapePostgrestValue(decoded.tiebreaker)})`);
+  }
+
+  if (query?.search) {
+    const searchPattern = escapePostgrestValue(`%${escapePostgrestLike(query.search)}%`);
+    q = q.ilike("app_name", searchPattern);
   }
 
   q = q.order("created_at", { ascending: false }).order("id", { ascending: false });
@@ -1048,6 +1152,12 @@ export async function handleResetAdminPasswordCLI(
 
   if (!user) return { success: false, message: `User '${username}' not found` };
 
+  try {
+    await bumpSessionEpochOrThrow(supabase, user.id);
+  } catch {
+    return { success: false, message: "Session revocation unavailable; password reset blocked" };
+  }
+
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
   const { error } = await supabase
     .from("users")
@@ -1059,18 +1169,6 @@ export async function handleResetAdminPasswordCLI(
   if (reset2FA) {
     await supabase.from("webauthn_credentials").delete().eq("user_id", user.id);
     await wipeUserTotpState(supabase, user.id);
-  }
-
-  // Invalidate every active session for the target so a compromised session
-  // cannot survive the password reset. Mirrors the HTTP admin reset path
-  // (handleAdminResetUserPassword). Note: this only revokes sessions held by
-  // the current process image; in a multi-replica deployment, restart each
-  // replica or rely on the shared revocation store.
-  try {
-    await bumpSessionEpoch(supabase, user.id);
-  } catch {
-    // Session revocation is best-effort during break-glass; the password reset
-    // and audit record are the authoritative recovery actions.
   }
 
   await recordAuditEvent(supabase, {

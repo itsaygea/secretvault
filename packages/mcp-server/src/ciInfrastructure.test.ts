@@ -55,6 +55,31 @@ describe("SV-029 grants migration", () => {
   });
 });
 
+describe("tenant service-role privilege boundary", () => {
+  it("removes residual non-DML privileges from every tenant table", () => {
+    const text = readFileSync(join(migrationsDir, "029_revoke_residual_service_role_privileges.sql"), "utf8");
+    expect(text).toMatch(/REVOKE ALL[\s\S]*FROM service_role/);
+    for (const table of [
+      "secrets",
+      "access_logs",
+      "service_profiles",
+      "client_applications",
+      "webauthn_credentials",
+      "totp_secrets",
+      "totp_pending_enrollments",
+      "totp_backup_codes",
+      "proxy_access_tokens",
+    ]) {
+      expect(text).toMatch(new RegExp(`secretvault\\.${table}`));
+    }
+  });
+
+  it("removes the obsolete proxy bootstrap policy after privilege revocation", () => {
+    const text = readFileSync(join(migrationsDir, "030_remove_proxy_service_role_policy.sql"), "utf8");
+    expect(text).toMatch(/DROP POLICY IF EXISTS proxy_access_tokens_service_role/);
+  });
+});
+
 describe("SV-029 CI PostgREST stack", () => {
   it("ci/secretvault.env service key matches the deterministic JWT minter", () => {
     const env = readCiEnv();

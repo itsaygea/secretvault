@@ -2,12 +2,13 @@ import { request as httpRequest, Agent as HttpAgent, type IncomingMessage, type 
 import { request as httpsRequest, Agent as HttpsAgent } from "node:https";
 import { PassThrough } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@secretvault/shared";
 import { decryptSecret, canonicalName, ENCRYPTION_PURPOSE, buildContextAad } from "@secretvault/shared";
 import { getProfileForProxy } from "./serviceProfiles.js";
 import type { Principal } from "./authz.js";
-import { buildProxyTargetUrl, isProxyPathAllowed, sanitizeRequestHeaders, sanitizeResponseHeaders, validateResolvedTarget, createSensitiveValueSet } from "./proxyPolicy.js";
+import { buildProxyTargetUrl, containsSensitiveValue, isProxyPathAllowed, sanitizeRequestHeaders, sanitizeResponseHeaders, validateResolvedTarget, createSensitiveValueSet } from "./proxyPolicy.js";
 import { finishAuditEvent, recordAuditEvent, startCriticalAuditEvent } from "./audit.js";
 import { buildUpstreamErrorEnvelope, getRequestId, writeErrorResponse } from "./httpContract.js";
 
@@ -21,6 +22,32 @@ const configuredMaxSockets = Number.parseInt(process.env.SECRETVAULT_PROXY_MAX_S
 const PROXY_MAX_SOCKETS = Number.isFinite(configuredMaxSockets) && configuredMaxSockets > 0
   ? configuredMaxSockets
   : 256;
+
+async function readResponseBody(upstream: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of upstream) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > PROXY_BODY_LIMIT) {
+      upstream.destroy();
+      throw new Error("upstream response exceeded the proxy body limit");
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks, size);
+}
+
+function decodeResponseForScan(body: Buffer, encoding: string | string[] | undefined): Buffer {
+  if (body.length === 0) return body;
+  const normalized = Array.isArray(encoding) ? encoding.join(",") : encoding;
+  const value = normalized?.trim().toLowerCase();
+  if (!value || value === "identity") return body;
+  if (value === "gzip" || value === "x-gzip") return gunzipSync(body);
+  if (value === "br") return brotliDecompressSync(body);
+  if (value === "deflate") return inflateSync(body);
+  throw new Error("unsupported upstream content encoding");
+}
 
 const configuredMaxFreeSockets = Number.parseInt(process.env.SECRETVAULT_PROXY_MAX_FREE_SOCKETS ?? "256", 10);
 const PROXY_MAX_FREE_SOCKETS = Number.isFinite(configuredMaxFreeSockets) && configuredMaxFreeSockets >= 0
@@ -337,10 +364,27 @@ export async function handleProxyRequest(
       upstream.resume(); // drain and discard the upstream error body
       res.end(envelope);
     } else {
-      // Successful responses stream through unchanged (streaming + 10 MiB limit
-      // preserved); only the value-redacted headers above are applied.
+      // A successful upstream can be just as hostile as an error response. Read
+      // it before sending anything so an upstream that reflects an injected
+      // credential cannot leak it in a 2xx body. The response is bounded to the
+      // same 10 MiB safety limit as requests.
+      let responseBody: Buffer;
+      try {
+        responseBody = await readResponseBody(upstream);
+        const scanBody = decodeResponseForScan(responseBody, upstream.headers["content-encoding"]);
+        if (containsSensitiveValue(scanBody.toString("utf8"), sensitive)) {
+          await finishAuditEvent(supabase, auditId, "failed", { reason: "upstream_response_contained_credential" });
+          writeErrorResponse(res, 502, "Upstream response contained credential material", requestId, "UPSTREAM_CREDENTIAL_REFLECTION");
+          return;
+        }
+      } catch {
+        await finishAuditEvent(supabase, auditId, "failed", { reason: "upstream_response_unscannable" });
+        writeErrorResponse(res, 502, "Upstream response could not be safely inspected", requestId, "UPSTREAM_RESPONSE_UNSCANNABLE");
+        return;
+      }
+
       res.writeHead(upstreamStatus, statusHeaders);
-      await pipeline(upstream, res);
+      res.end(responseBody);
     }
 
     await finishAuditEvent(supabase, auditId, upstreamStatus < 400 ? "succeeded" : "failed", {

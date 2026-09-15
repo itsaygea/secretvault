@@ -49,6 +49,14 @@ describe("linking-key authorization", () => {
       scopes: ["runner:secret:*"],
     };
     expect(hasRunnerScope(wildcardRunnerPrincipal, "any_key")).toBe(true);
+
+    const sessionPrincipal: Principal = {
+      ...linkingPrincipal,
+      credentialType: "session",
+      clientId: null,
+      scopes: [],
+    };
+    expect(hasRunnerScope(sessionPrincipal, "openai_key")).toBe(false);
   });
 });
 
@@ -82,5 +90,4 @@ describe("SV-AUD-010 inline profile-secret authorization rule", () => {
     expect(admits(session, [{ name: "x", value: "y" }])).toBe(true);
   });
 });
-
 

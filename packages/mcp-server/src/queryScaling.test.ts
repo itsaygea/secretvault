@@ -1,5 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "@secretvault/testing";
-import { clampPageSize, decodeCursor, decodeBeforeCursor, encodeCursor, encodeBeforeCursor, escapePostgrestValue, initCursorKey, paginateQuery } from "./pagination.js";
+import { clampPageSize, decodeCursor, decodeBeforeCursor, encodeCursor, encodeBeforeCursor, escapePostgrestLike, escapePostgrestValue, initCursorKey, paginateQuery } from "./pagination.js";
+import { handleListSecrets } from "./api.js";
+import { handleListClients } from "./users.js";
 import { registerListSecrets } from "./tools/listSecrets.js";
 import { registerSearchSecrets } from "./tools/searchSecrets.js";
 
@@ -97,8 +99,14 @@ describe("pagination utilities", () => {
 
     it("escapes PostgREST-significant characters in values", () => {
       expect(escapePostgrestValue('a.b,(c)')).toBe('"a.b,(c)"');
-      // embedded quotes are doubled
-      expect(escapePostgrestValue('a"b')).toBe('"a""b"');
+      // PostgREST URL literals use backslash escaping for embedded quotes and
+      // backslashes, not SQL-style doubled quotes.
+      expect(escapePostgrestValue('a"b')).toBe('"a\\"b"');
+      expect(escapePostgrestValue("a\\b")).toBe('"a\\\\b"');
+    });
+
+    it("escapes ilike wildcards before wrapping a search literal", () => {
+      expect(escapePostgrestLike("a%_\\b")).toBe("a\\%\\_\\\\b");
     });
   });
 
@@ -246,6 +254,48 @@ describe("list_secrets tool pagination", () => {
     const body = JSON.parse(result.content[0].text);
     expect(body.data).toHaveLength(5);
     expect(body.next_cursor).toBeNull();
+  });
+});
+
+describe("REST secret list filtering", () => {
+  it("applies bounded metadata search and exact environment filters", async () => {
+    const rows = [
+      { id: UUID_A, name: "alpha_key", display_name: "Alpha Key", environment: "production", masked_preview: "abc***xyz", tags: [], created_at: "2026-01-01", updated_at: "2026-01-01" },
+    ];
+    const { builder, captured } = mockQueryBuilder(rows);
+    const auditBuilder: any = {
+      insert: () => ({ select: () => ({ single: async () => ({ data: { id: "audit-1" }, error: null }) }) }),
+    };
+    const supabase = { from: vi.fn((table: string) => table === "secrets" ? builder : auditBuilder) } as any;
+
+    const result = await handleListSecrets(supabase, "user-1", false, {
+      pageSize: 10,
+      search: 'a"%_\\b',
+      environment: "production",
+    });
+
+    expect(result.status).toBe(200);
+    expect(captured.or).toBe('name.ilike."%a\\"\\\\%\\\\_\\\\\\\\b%",display_name.ilike."%a\\"\\\\%\\\\_\\\\\\\\b%"');
+    expect(captured.eq_environment).toBe("production");
+  });
+});
+
+describe("REST client list filtering", () => {
+  it("applies bounded app-name search without returning linking keys", async () => {
+    const rows = [
+      { id: UUID_A, app_name: "Build Agent", key_prefix: "sv_1234", scopes: ["proxy:github"], created_at: "2026-01-01", last_used_at: null },
+    ];
+    const { builder, captured } = mockQueryBuilder(rows);
+    const supabase = { from: vi.fn(() => builder) } as any;
+
+    const result = await handleListClients(supabase, "user-1", {
+      pageSize: 10,
+      search: 'a"%_\\b',
+    });
+
+    expect(result.status).toBe(200);
+    expect(captured.ilike_app_name).toBe('"%a\\"\\\\%\\\\_\\\\\\\\b%"');
+    expect(JSON.stringify(result.body)).not.toContain("linking_key");
   });
 });
 
