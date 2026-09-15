@@ -43,7 +43,7 @@ describe("server updater safety contract (SV-AUD-015)", () => {
   });
 
   it("rejects non-matching tracked checkouts, supports safe adoption, and refuses destructive rollback commands", () => {
-    expect(script).toMatch(/git -C \"\$APP_DIR\" diff --quiet/);
+    expect(script).toMatch(/git -C \"\$APP_DIR\" hash-object/);
     expect(script).toMatch(/tracked checkout differs from the requested release/);
     expect(script).toMatch(/update-ref \"refs\/heads\/\$branch\"/);
     expect(script).toMatch(/read-tree \"\$target\"/);

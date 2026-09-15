@@ -465,18 +465,28 @@ adopt_matching_release() {
   branch="$(git -C "$APP_DIR" branch --show-current)"
   current="$(git -C "$APP_DIR" rev-parse HEAD)"
 
-  if ! git -C "$APP_DIR" diff --quiet "$target" --; then
-    die "tracked checkout differs from the requested release; refusing to overwrite local changes"
-  fi
-
-  # An untracked file with a path that the release now tracks would be
-  # overwritten by a future checkout. Refuse that case instead of guessing
-  # whether the file is disposable.
+  # Compare every file in the target tree to the bytes already on disk. This
+  # handles files introduced by the target release that are currently
+  # untracked because a previous deployment copied them with rsync.
   while IFS= read -r -d '' path; do
-    if git -C "$APP_DIR" cat-file -e "$target:$path" 2>/dev/null; then
-      die "untracked file would conflict with the requested release: $path"
+    [ -e "$APP_DIR/$path" ] || [ -L "$APP_DIR/$path" ] || \
+      die "requested release file is missing from the deployment: $path"
+    local expected=""
+    local actual=""
+    expected="$(git -C "$APP_DIR" rev-parse "$target:$path")"
+    actual="$(git -C "$APP_DIR" hash-object -- "$path")"
+    [ "$actual" = "$expected" ] || \
+      die "tracked checkout differs from the requested release; refusing to overwrite local changes"
+  done < <(git -C "$APP_DIR" ls-tree -r -z --name-only "$target")
+
+  # Also reject stale files that are tracked by the current checkout but were
+  # removed by the target release. They would otherwise survive adoption.
+  while IFS= read -r -d '' path; do
+    if ! git -C "$APP_DIR" cat-file -e "$target:$path" 2>/dev/null && \
+       { [ -e "$APP_DIR/$path" ] || [ -L "$APP_DIR/$path" ]; }; then
+      die "tracked file would be removed by the requested release: $path"
     fi
-  done < <(git -C "$APP_DIR" ls-files --others --exclude-standard -z)
+  done < <(git -C "$APP_DIR" ls-files -z)
 
   # The working tree already contains the requested release (for example,
   # after a prior rsync deployment). Move only the branch ref and index; do not
