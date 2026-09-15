@@ -51,6 +51,7 @@ COMPOSE_FILES=()
 USE_BUNDLED=false
 USE_CADDY=false
 USE_DIST=false
+TRACKED_DIRTY=false
 
 die() {
   echo -e "${RED}Error: $*${RESET}" >&2
@@ -264,8 +265,12 @@ check_git_state() {
   [ -n "$(git -C "$APP_DIR" branch --show-current)" ] || \
     die "deployment checkout is detached; check it out on a release branch before upgrading"
 
-  if ! git -C "$APP_DIR" diff --quiet || ! git -C "$APP_DIR" diff --cached --quiet; then
+  if ! git -C "$APP_DIR" diff --cached --quiet; then
     die "tracked changes are present in $APP_DIR; commit or stash them before upgrading"
+  fi
+  if ! git -C "$APP_DIR" diff --quiet; then
+    TRACKED_DIRTY=true
+    warn "tracked files differ from the current Git commit; the updater will only adopt them if they exactly match the requested release"
   fi
 
   local untracked_count=""
@@ -453,6 +458,36 @@ apply_release() {
   [ "$applied" = "$RELEASE_REF" ] || die "checkout did not advance to the requested release"
 }
 
+adopt_matching_release() {
+  local target="$1"
+  local branch=""
+  local current=""
+  branch="$(git -C "$APP_DIR" branch --show-current)"
+  current="$(git -C "$APP_DIR" rev-parse HEAD)"
+
+  if ! git -C "$APP_DIR" diff --quiet "$target" --; then
+    die "tracked checkout differs from the requested release; refusing to overwrite local changes"
+  fi
+
+  # An untracked file with a path that the release now tracks would be
+  # overwritten by a future checkout. Refuse that case instead of guessing
+  # whether the file is disposable.
+  while IFS= read -r -d '' path; do
+    if git -C "$APP_DIR" cat-file -e "$target:$path" 2>/dev/null; then
+      die "untracked file would conflict with the requested release: $path"
+    fi
+  done < <(git -C "$APP_DIR" ls-files --others --exclude-standard -z)
+
+  # The working tree already contains the requested release (for example,
+  # after a prior rsync deployment). Move only the branch ref and index; do not
+  # rewrite any application file or remove any operator-owned untracked file.
+  git -C "$APP_DIR" update-ref "refs/heads/$branch" "$target" "$current"
+  git -C "$APP_DIR" read-tree "$target"
+  git -C "$APP_DIR" diff --quiet "$target" -- || die "release adoption changed the tracked working tree unexpectedly"
+  git -C "$APP_DIR" diff --cached --quiet || die "release adoption left staged changes unexpectedly"
+  ok "adopted the already-deployed tracked files into the immutable Git release"
+}
+
 verify_compose_config() {
   compose config --quiet
 }
@@ -528,7 +563,11 @@ main() {
 
   backup_all
   fetch_release
-  apply_release
+  if [ "$TRACKED_DIRTY" = true ]; then
+    adopt_matching_release "$RELEASE_REF"
+  else
+    apply_release
+  fi
   deploy_release
 
   echo -e "${GREEN}========================================================================${RESET}"

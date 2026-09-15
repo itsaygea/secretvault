@@ -28,7 +28,7 @@ bash upgrade-server.sh --yes
 ```
 
 See [`docs/upgrade.md`](upgrade.md) for registry-image deployments and rollback
-cautions. The updater refuses tracked local changes and never uses
+cautions. The updater refuses non-matching tracked local changes and never uses
 `docker compose down -v`.
 
 ### Option B: Manual Docker Compose Deployment

@@ -61,9 +61,11 @@ bash upgrade-server.sh --yes
 The updater detects bundled PostgreSQL, external PostgreSQL (including shared or
 HA PostgreSQL), and the Caddy overlay. It never enables the bundled overlay for
 an external database. Untracked files are preserved unless the requested Git
-release would overwrite one; tracked changes must be committed or stashed first.
-Backups are written beside the deployment in a timestamped directory with a
-`SHA256SUMS` manifest. The updater does not print `.env` or database values.
+release would overwrite one. Arbitrary tracked edits are refused; if a prior
+rsync already placed the exact requested release on disk, the updater adopts
+the Git metadata without overwriting files. Backups are written beside the
+deployment in a timestamped directory with a `SHA256SUMS` manifest. The updater
+does not print `.env` or database values.
 
 For an older checkout that does not yet contain the updater, fetch the script
 from the repository and run it in dry-run mode first:

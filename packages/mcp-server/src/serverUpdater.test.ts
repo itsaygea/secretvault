@@ -32,7 +32,7 @@ describe("server updater safety contract (SV-AUD-015)", () => {
     expect(script).toMatch(/pg_dump/);
     expect(script).toMatch(/pg_dumpall/);
     expect(script).toMatch(/SHA256SUMS/);
-    expect(script).toMatch(/backup_all\n  fetch_release\n  apply_release/);
+    expect(script).toMatch(/backup_all\n  fetch_release\n  if \[ "\$TRACKED_DIRTY" = true \]; then/);
   });
 
   it("supports the bundled and external/shared HA database topologies", () => {
@@ -42,9 +42,11 @@ describe("server updater safety contract (SV-AUD-015)", () => {
     expect(script).toMatch(/compose exec -T postgres pg_dump/);
   });
 
-  it("refuses dirty tracked checkouts, registry-image mode, and destructive rollback commands", () => {
+  it("rejects non-matching tracked checkouts, supports safe adoption, and refuses destructive rollback commands", () => {
     expect(script).toMatch(/git -C \"\$APP_DIR\" diff --quiet/);
-    expect(script).toMatch(/tracked changes are present/);
+    expect(script).toMatch(/tracked checkout differs from the requested release/);
+    expect(script).toMatch(/update-ref \"refs\/heads\/\$branch\"/);
+    expect(script).toMatch(/read-tree \"\$target\"/);
     expect(script).toMatch(/registry-image deployments are not handled/);
     expect(executableLines).not.toMatch(/git[^\n]*reset\s+--hard/);
     expect(executableLines).not.toMatch(/docker[^\n]*compose[^\n]*down\s+-v/);
