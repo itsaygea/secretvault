@@ -12,7 +12,6 @@ claude.md
 AGENTS.md
 agents.md
 .agents/
-.dockerignore
 .serena/
 /docs/wayfinder/
 docs/security-audit-*.md
