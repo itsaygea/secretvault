@@ -113,10 +113,10 @@ export function enterTenantContext(identity: TenantIdentity): string | null {
 
 /**
  * A `fetch` override for the shared supabase client. When a tenant context is
- * active, each database request is stamped with that tenant's JWT in both
- * Authorization and apikey (PostgREST accepts either); otherwise the request
- * passes through unchanged (the client's base service-role headers apply, used
- * only by the pre-auth/global routes).
+ * active, each database request is stamped with that tenant's JWT only in
+ * Authorization. The Supabase client's configured service key remains in
+ * `apikey`, which is required by the self-hosted Supabase gateway; otherwise
+ * the request passes through unchanged (used by pre-auth/global routes).
  */
 export function tenantAwareFetch(
   baseFetch: typeof globalThis.fetch,
@@ -126,7 +126,6 @@ export function tenantAwareFetch(
     if (token) {
       const headers = new Headers(init?.headers);
       headers.set("Authorization", `Bearer ${token}`);
-      headers.set("apikey", token);
       init = { ...init, headers };
     }
     return baseFetch(input as RequestInfo, init);

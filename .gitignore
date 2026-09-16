@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .env
+.local/
 *.tsbuildinfo
 AYGEA.md
 Aygea.md
