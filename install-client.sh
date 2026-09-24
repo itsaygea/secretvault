@@ -142,23 +142,62 @@ main() {
   npm run build &>/dev/null
 
   echo -e "${CYAN}Installing SecretVault CLI binaries (secretvault, secretvault-cli, secretvault-mcp, securevault)...${RESET}"
-  rm -f "$HOME/.local/bin/secretvault" "$HOME/.local/bin/secretvault-cli" "$HOME/.local/bin/secretvault-mcp" "$HOME/.local/bin/securevault" "$HOME/.local/bin/securevault-cli" &>/dev/null || true
+  LOCAL_BIN_DIR="$HOME/.local/bin"
+  rm -f "$LOCAL_BIN_DIR/secretvault" "$LOCAL_BIN_DIR/secretvault-cli" "$LOCAL_BIN_DIR/secretvault-mcp" "$LOCAL_BIN_DIR/securevault" "$LOCAL_BIN_DIR/securevault-cli" &>/dev/null || true
   # SV-AUD-012: install is fail-closed — a failed CLI install must surface, not be swallowed.
-  npm install -g ./packages/mcp-server --force &>/dev/null || npm install -g ./packages/mcp-server --prefix="$HOME/.local" --force &>/dev/null
-
-  mkdir -p "$HOME/.local/bin"
-  NODE_BIN_DIR="$(node -e 'console.log(require("path").dirname(process.execPath))' 2>/dev/null || true)"
-  if [ -n "$NODE_BIN_DIR" ] && [ -x "$NODE_BIN_DIR/secretvault" ]; then
-    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault")" "$HOME/.local/bin/secretvault" 2>/dev/null || true
-    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-cli")" "$HOME/.local/bin/secretvault-cli" 2>/dev/null || true
-    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-mcp")" "$HOME/.local/bin/secretvault-mcp" 2>/dev/null || true
-    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault")" "$HOME/.local/bin/securevault" 2>/dev/null || true
-    ln -sf "$(realpath "$NODE_BIN_DIR/secretvault-cli")" "$HOME/.local/bin/securevault-cli" 2>/dev/null || true
+  NPM_GLOBAL_PREFIX="$(npm prefix -g 2>/dev/null || true)"
+  if [ -n "$NPM_GLOBAL_PREFIX" ] && npm install -g ./packages/mcp-server --force &>/dev/null; then
+    NPM_BIN_DIR="$NPM_GLOBAL_PREFIX/bin"
+  else
+    NPM_GLOBAL_PREFIX="$HOME/.local"
+    npm install -g ./packages/mcp-server --prefix="$NPM_GLOBAL_PREFIX" --force &>/dev/null
+    NPM_BIN_DIR="$NPM_GLOBAL_PREFIX/bin"
   fi
 
-  if command -v secretvault &>/dev/null || [ -x "$HOME/.local/bin/secretvault" ]; then
-    echo -e "${GREEN}✓ SecretVault CLI binaries ('secretvault', 'securevault') installed to PATH.${RESET}\n"
+  mkdir -p "$LOCAL_BIN_DIR"
+
+  # npm's user-local prefix is not guaranteed to be on PATH. Activate it for
+  # this installer process and persist the setting for future interactive shells.
+  case "${SHELL##*/}" in
+    bash) SHELL_RC="$HOME/.bashrc" ;;
+    zsh) SHELL_RC="$HOME/.zshrc" ;;
+    *) SHELL_RC="$HOME/.profile" ;;
+  esac
+
+  case ":${PATH:-}:" in
+    *":$LOCAL_BIN_DIR:"*) ;;
+    *) export PATH="$LOCAL_BIN_DIR:$PATH" ;;
+  esac
+
+  PATH_EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH"'
+  if [ ! -f "$SHELL_RC" ] || ! grep -Fqx "$PATH_EXPORT_LINE" "$SHELL_RC" 2>/dev/null; then
+    {
+      printf '\n# SecretVault CLI\n'
+      printf '%s\n' "$PATH_EXPORT_LINE"
+    } >> "$SHELL_RC"
   fi
+
+  link_cli() {
+    local name="$1"
+    local source="$NPM_BIN_DIR/$name"
+    if [ ! -x "$source" ]; then
+      echo -e "${RED}npm did not create the expected CLI binary: ${source}${RESET}" >&2
+      exit 1
+    fi
+    if [ "$source" != "$LOCAL_BIN_DIR/$name" ]; then
+      ln -sfn "$source" "$LOCAL_BIN_DIR/$name"
+    fi
+  }
+  for CLI_NAME in secretvault secretvault-cli secretvault-mcp securevault securevault-cli; do
+    link_cli "$CLI_NAME"
+  done
+
+  if ! command -v secretvault &>/dev/null || ! command -v securevault &>/dev/null; then
+    echo -e "${RED}SecretVault CLI installation completed without discoverable 'secretvault' and 'securevault' commands.${RESET}" >&2
+    echo -e "${YELLOW}Expected user-local binaries under ${LOCAL_BIN_DIR}; inspect the npm install output and PATH.${RESET}" >&2
+    exit 1
+  fi
+  echo -e "${GREEN}✓ SecretVault CLI binaries ('secretvault', 'securevault') installed and available at $(command -v secretvault).${RESET}\n"
 
   echo -e "${GREEN}✓ Environment ready. Launching setup...${RESET}\n"
   if [ -e /dev/tty ]; then

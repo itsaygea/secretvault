@@ -1,5 +1,5 @@
 {
-  "name": "@secretvault/mcp-server",
+  "name": "@secretvault/server",
   "version": "0.1.0",
   "type": "module",
   "bin": {

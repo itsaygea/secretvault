@@ -50,6 +50,22 @@ describe("install-client.sh fail-closed install (SV-AUD-012)", () => {
   });
 });
 
+describe("install-client.sh PATH registration", () => {
+  it("activates the user-local bin directory and persists it for future shells", () => {
+    expect(client).toMatch(/LOCAL_BIN_DIR="\$HOME\/\.local\/bin"/);
+    expect(client).toMatch(/export PATH="\$LOCAL_BIN_DIR:\$PATH"/);
+    expect(client).toContain(".bashrc");
+    expect(client).toContain(".zshrc");
+    expect(client).toContain(".profile");
+    expect(client).toMatch(/NPM_GLOBAL_PREFIX=.*npm prefix -g/);
+    expect(client).toContain('NPM_BIN_DIR="$NPM_GLOBAL_PREFIX/bin"');
+    expect(client).not.toContain("NODE_BIN_DIR=");
+    expect(client).not.toContain("realpath");
+    expect(client).toMatch(/command -v secretvault/);
+    expect(client).toMatch(/command -v securevault/);
+  });
+});
+
 describe("SV-AUD-012 mutable-branch URL containment", () => {
   // When a release tag is set, the mutable main tarball URL is only reached via
   // the RELEASE_REF=main branch. The archive URL must be parameterized through

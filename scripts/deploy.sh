@@ -11,7 +11,7 @@ echo "1. Verifying local compilation across all workspace packages..."
 npm run build -w @secretvault/shared && \
 npm run build -w @secretvault/bridge && \
 npm run build -w @secretvault/sdk && \
-npm run build -w @secretvault/mcp-server
+npm run build -w @secretvault/server
 
 echo "2. Rsyncing project files to the configured remote Docker host..."
 rsync -avz --exclude 'node_modules' --exclude 'dist' ./ "${SECRETVAULT_DEPLOY_HOST}:${remote_path}/"
