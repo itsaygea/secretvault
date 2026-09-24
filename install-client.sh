@@ -23,7 +23,7 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
-  VERSION="v0.1.8"
+  VERSION="v0.1.9"
 
   # SV-AUD-012: fail-closed SHA-256 verification (see install-server.sh).
   verify_sha256() {
