@@ -23,7 +23,7 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
-  VERSION="v0.1.10"
+  VERSION="v0.1.11"
 
   # SV-AUD-012: fail-closed SHA-256 verification (see install-server.sh).
   verify_sha256() {
@@ -210,6 +210,13 @@ main() {
     echo -e "${YELLOW}Expected user-local binaries under ${LOCAL_BIN_DIR}; inspect the npm install output and PATH.${RESET}" >&2
     exit 1
   fi
+
+  INSTALL_MARKER="$HOME/.local/share/secretvault-cli/current-commit"
+  MARKER_TMP="${INSTALL_MARKER}.tmp.$$"
+  printf '%s\n' "$RUNTIME_VERSION" > "$MARKER_TMP"
+  chmod 600 "$MARKER_TMP"
+  mv -f "$MARKER_TMP" "$INSTALL_MARKER"
+
   echo -e "${GREEN}✓ SecretVault CLI binaries ('secretvault', 'securevault') installed and available at $(command -v secretvault).${RESET}\n"
 
   echo -e "${GREEN}✓ Environment ready. Launching setup...${RESET}\n"

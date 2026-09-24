@@ -65,6 +65,8 @@ describe("install-client.sh PATH registration", () => {
     expect(client).toContain('cp -a "$TMP_DIR/." "$RUNTIME_DIR/"');
     expect(client).toContain('cd "$RUNTIME_DIR"');
     expect(client).toContain('"$LOCAL_BIN_DIR/securevault" --help');
+    expect(client).toContain('current-commit');
+    expect(client).toContain('printf \'%s\\n\' "$RUNTIME_VERSION"');
     expect(client).toMatch(/command -v secretvault/);
     expect(client).toMatch(/command -v securevault/);
   });

@@ -1,12 +1,14 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 
 const UPDATE_REPOSITORY = "itsaygea/secretvault";
 const UPDATE_API_URL = `https://api.github.com/repos/${UPDATE_REPOSITORY}/commits/main`;
 const UPDATE_SCRIPT_BASE_URL = `https://raw.githubusercontent.com/${UPDATE_REPOSITORY}`;
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
+const INSTALL_MARKER_PATH = [".local", "share", "secretvault-cli", "current-commit"] as const;
+const PERSISTENT_RUNTIME_RE = /(?:^|\/)secretvault-cli\/([0-9a-f]{40})\/packages\/mcp-server\/dist\/index\.js$/i;
 
 interface CommitResponse {
   sha?: unknown;
@@ -14,6 +16,45 @@ interface CommitResponse {
 
 export function isImmutableCommitRef(value: string): boolean {
   return COMMIT_SHA_RE.test(value);
+}
+
+export function shouldSkipUpdate(latestCommit: string, installedCommit: string | null): boolean {
+  return installedCommit !== null && latestCommit.toLowerCase() === installedCommit.toLowerCase();
+}
+
+export function extractInstalledCommit(runtimePath: string): string | null {
+  const match = runtimePath.match(PERSISTENT_RUNTIME_RE);
+  return match?.[1]?.toLowerCase() ?? null;
+}
+
+function installedCommitPath(home = process.env.HOME || homedir()): string {
+  return join(home, ...INSTALL_MARKER_PATH);
+}
+
+async function readInstalledCommit(home?: string): Promise<string | null> {
+  try {
+    const marker = (await readFile(installedCommitPath(home), "utf8")).trim();
+    if (isImmutableCommitRef(marker)) return marker.toLowerCase();
+  } catch {
+    // Older installers did not write a marker; fall back to their persistent
+    // runtime path below.
+  }
+
+  try {
+    if (!process.argv[1]) return null;
+    return extractInstalledCommit(await realpath(process.argv[1]));
+  } catch {
+    return null;
+  }
+}
+
+async function writeInstalledCommit(commit: string, home?: string): Promise<void> {
+  if (!isImmutableCommitRef(commit)) throw new Error("refusing to record an invalid installed commit");
+  const markerPath = installedCommitPath(home);
+  await mkdir(dirname(markerPath), { recursive: true, mode: 0o700 });
+  const temporaryMarkerPath = `${markerPath}.tmp-${process.pid}`;
+  await writeFile(temporaryMarkerPath, `${commit.toLowerCase()}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(temporaryMarkerPath, markerPath);
 }
 
 async function fetchText(url: string, fetchImpl: typeof fetch = fetch): Promise<string> {
@@ -91,24 +132,40 @@ function runInstaller(scriptPath: string, environment: NodeJS.ProcessEnv): Promi
   });
 }
 
-export async function handleUpdateCli(): Promise<void> {
+export interface UpdateCliDependencies {
+  fetchImpl?: typeof fetch;
+  runInstaller?: (scriptPath: string, environment: NodeJS.ProcessEnv) => Promise<number>;
+  home?: string;
+}
+
+export async function handleUpdateCli(dependencies: UpdateCliDependencies = {}): Promise<void> {
   console.log("\x1b[1;36m");
   console.log("════════════════════════════════════════════════════════════════════════");
   console.log("       ⚡ SecretVault CLI Auto-Updater                                  ");
   console.log("════════════════════════════════════════════════════════════════════════");
   console.log("\x1b[0m");
-  console.log("\n\x1b[36mResolving and installing the latest SecretVault CLI...\x1b[0m");
+  console.log("\n\x1b[36mResolving the latest SecretVault CLI...\x1b[0m");
   console.log("\x1b[90mExisting local credential files will be left untouched.\x1b[0m\n");
 
   let temporaryDirectory: string | null = null;
   try {
-    const commit = await resolveUpdateCommit();
+    const fetchImpl = dependencies.fetchImpl ?? fetch;
+    const commit = await resolveUpdateCommit(fetchImpl);
+    const installedCommit = await readInstalledCommit(dependencies.home);
+    if (shouldSkipUpdate(commit, installedCommit)) {
+      await writeInstalledCommit(commit, dependencies.home).catch(() => undefined);
+      console.log(`\n\x1b[1;32mSecretVault CLI is already up to date (${commit.slice(0, 12)}…). No build required.\x1b[0m\n`);
+      return;
+    }
+
     temporaryDirectory = await mkdtemp(join(tmpdir(), "secretvault-update-"));
-    const installerPath = await downloadInstaller(commit, temporaryDirectory);
+    const installerPath = await downloadInstaller(commit, temporaryDirectory, fetchImpl);
     console.log(`\x1b[36mUsing immutable source commit ${commit.slice(0, 12)}…\x1b[0m\n`);
 
-    const exitCode = await runInstaller(installerPath, buildUpdateEnvironment(commit));
+    const runInstallerImpl = dependencies.runInstaller ?? runInstaller;
+    const exitCode = await runInstallerImpl(installerPath, buildUpdateEnvironment(commit));
     if (exitCode === 0) {
+      await writeInstalledCommit(commit, dependencies.home);
       console.log("\n\x1b[1;32m========================================================================\x1b[0m");
       console.log("\x1b[1;32m       🎉 SECRETVAULT CLI UPDATED SUCCESSFULLY                          \x1b[0m");
       console.log("\x1b[1;32m========================================================================\x1b[0m\n");

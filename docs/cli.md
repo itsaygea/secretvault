@@ -104,7 +104,9 @@ Update your CLI binaries to the latest release at any time:
 secretvault update
 ```
 
-The auto-updater resolves `main` to an immutable commit, downloads the installer from that exact commit, and preserves the local credential file and developer-tool configurations. It does not print or reconfigure credential values.
+The auto-updater resolves `main` to an immutable commit and compares it with the installed commit before downloading or rebuilding. If they match, it exits without downloading, reinstalling, or rebuilding. When a newer commit exists, it downloads the installer from that exact commit and preserves the local credential file and developer-tool configurations. It does not print or reconfigure credential values.
+
+The installed commit is recorded at `~/.local/share/secretvault-cli/current-commit`. Existing installs created by the persistent-runtime installer can also be recognized from their runtime path, so the first no-op update does not need to rebuild them.
 
 To update from a specific verified commit instead of the current `main` tip:
 
