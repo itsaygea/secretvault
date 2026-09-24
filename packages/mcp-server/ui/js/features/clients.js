@@ -1,9 +1,8 @@
-import { getState, setState } from "../state.js";
+import { getState, setState, getResourceState, setResourceState } from "../state.js";
 import { getActiveToken, apiGet, apiPost, apiPatch, apiDelete, withMutationGuard } from "../api.js";
 import { showToast } from "../notifications.js";
 import { escapeHtml, apiErrorMessage, extractList } from "../utils.js";
 import { closeModal, openModal, promptConfirmAction } from "../dialog.js";
-import { setResourceState } from "../state.js";
 import { updateDocsSnippets } from "./settings.js";
 
 const CLIENT_PAGE_SIZE = 25;
