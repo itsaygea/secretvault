@@ -23,7 +23,7 @@ main() {
   RED="\033[1;31m"
   RESET="\033[0m"
 
-  VERSION="v0.1.9"
+  VERSION="v0.1.10"
 
   # SV-AUD-012: fail-closed SHA-256 verification (see install-server.sh).
   verify_sha256() {
@@ -141,6 +141,16 @@ main() {
   echo -e "${CYAN}Building packages...${RESET}"
   npm run build &>/dev/null
 
+  # npm links local workspace packages back to their source directory. Keep a
+  # persistent copy before installing globally so cleanup cannot leave broken
+  # CLI links pointing into TMP_DIR.
+  RUNTIME_VERSION="$(git -C "$TMP_DIR" rev-parse HEAD 2>/dev/null || printf '%s' "$RELEASE_REF" | tr -c '[:alnum:]._-' '-')"
+  RUNTIME_DIR="$HOME/.local/share/secretvault-cli/$RUNTIME_VERSION"
+  rm -rf "$RUNTIME_DIR"
+  mkdir -p "$RUNTIME_DIR"
+  cp -a "$TMP_DIR/." "$RUNTIME_DIR/"
+  cd "$RUNTIME_DIR"
+
   echo -e "${CYAN}Installing SecretVault CLI binaries (secretvault, secretvault-cli, secretvault-mcp, securevault)...${RESET}"
   LOCAL_BIN_DIR="$HOME/.local/bin"
   rm -f "$LOCAL_BIN_DIR/secretvault" "$LOCAL_BIN_DIR/secretvault-cli" "$LOCAL_BIN_DIR/secretvault-mcp" "$LOCAL_BIN_DIR/securevault" "$LOCAL_BIN_DIR/securevault-cli" &>/dev/null || true
@@ -192,7 +202,10 @@ main() {
     link_cli "$CLI_NAME"
   done
 
-  if ! command -v secretvault &>/dev/null || ! command -v securevault &>/dev/null; then
+  if ! command -v secretvault &>/dev/null ||
+    ! command -v securevault &>/dev/null ||
+    ! "$LOCAL_BIN_DIR/secretvault" --help &>/dev/null ||
+    ! "$LOCAL_BIN_DIR/securevault" --help &>/dev/null; then
     echo -e "${RED}SecretVault CLI installation completed without discoverable 'secretvault' and 'securevault' commands.${RESET}" >&2
     echo -e "${YELLOW}Expected user-local binaries under ${LOCAL_BIN_DIR}; inspect the npm install output and PATH.${RESET}" >&2
     exit 1

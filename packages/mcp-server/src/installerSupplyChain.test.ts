@@ -61,6 +61,10 @@ describe("install-client.sh PATH registration", () => {
     expect(client).toContain('NPM_BIN_DIR="$NPM_GLOBAL_PREFIX/bin"');
     expect(client).not.toContain("NODE_BIN_DIR=");
     expect(client).not.toContain("realpath");
+    expect(client).toMatch(/RUNTIME_DIR="\$HOME\/\.local\/share\/secretvault-cli\//);
+    expect(client).toContain('cp -a "$TMP_DIR/." "$RUNTIME_DIR/"');
+    expect(client).toContain('cd "$RUNTIME_DIR"');
+    expect(client).toContain('"$LOCAL_BIN_DIR/securevault" --help');
     expect(client).toMatch(/command -v secretvault/);
     expect(client).toMatch(/command -v securevault/);
   });
