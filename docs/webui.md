@@ -1,6 +1,6 @@
 # SecretVault Web UI & Admin Portal Guide (`/ui`)
 
-SecretVault provides a responsive Web UI (`http://localhost:3004/ui` or `https://vault.example.com/ui`) for managing secrets, service profiles, users, and audit logs.
+SecretVault provides a responsive Web UI (`http://localhost:3004/ui` or `https://vault.example.com/ui`) for managing secrets, service profiles, users, and audit logs. For a copy/paste integration walkthrough, see the [Proxy Integration Quick Guide](proxy-quickstart.md).
 
 ---
 
@@ -23,16 +23,18 @@ Service Profiles map proxy routes (`/proxy/<service_name>/*`) to upstream target
 2. Click **Create Profile**.
 3. Fill in:
    - **Profile Name**: `openai` (used in proxy route `/proxy/openai/*`).
-   - **Target Base URL**: `https://api.openai.com`.
-   - **Auth Type**: `Bearer Token` (or `Header`, `Query Parameter`, `Basic Auth`).
-   - **Secret Name**: `OPENAI_API_KEY`.
-4. Click **Save Profile**.
+   - **Target Upstream URL**: paste the complete provider URL, such as `https://api.openai.com/v1/responses`.
+   - **Auth Method**: `Bearer Token` (or the method required by the upstream service).
+   - **Credential Secret**: select the stored provider secret, such as `OPENAI_API_KEY`.
+4. Use the route preview to check the split. The profile target is the provider origin (`https://api.openai.com`); the path belongs on the client-facing proxy URL.
+5. Click **Create Profile**.
 
 ### Proxy URL Route Mapping
 
 ```text
 Service Profile Name:    example_service
-Target Base URL:         https://api.example.com
+Provider URL:            https://api.example.com/v1/resource
+Target saved in profile: https://api.example.com
 
 Client Proxy Request:    https://vault.example.com/proxy/example_service/v1/resource
       │

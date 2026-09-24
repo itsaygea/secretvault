@@ -133,6 +133,7 @@ secretvault secret delete
 ## Documentation Index
 
 - 📖 **[Central Usage Index](docs/usage.md)** — Master documentation overview and navigation index.
+- 🔗 **[Proxy Integration Quick Guide](docs/proxy-quickstart.md)** — Copy/paste Service Profile, proxy URL, MCode, and rotation setup.
 - 🖥️ **[CLI & Terminal Manager Guide](docs/cli.md)** — Interactive manager (`secretvault` / `securevault`), `secretvault update`, stdio runner, and local credentials.
 - 🌐 **[Web UI & Admin Portal](docs/webui.md)** — Web dashboard (`/ui`), Service Profiles, Passkey & TOTP step-up authentication, access logs.
 - ⚡ **[MCP & Developer Tools Guide](docs/mcp.md)** — Integration guide for Antigravity IDE, Claude Code, Claude Desktop, OpenCode, Codex, Cursor.

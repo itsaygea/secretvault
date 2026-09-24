@@ -1,10 +1,11 @@
 import { getState, setState } from "../state.js";
 import { getActiveToken, apiGet, apiPost, apiDelete, withMutationGuard } from "../api.js";
 import { showToast } from "../notifications.js";
-import { escapeHtml, apiErrorMessage, extractList } from "../utils.js";
+import { escapeHtml, apiErrorMessage, extractList, copySnippetText } from "../utils.js";
 import { closeModal, openModal, promptConfirmAction } from "../dialog.js";
 import { setResourceState } from "../state.js";
 import { loadSecrets } from "./secrets.js";
+import { buildProfileRoutePreview, getCurrentVaultOrigin } from "./profileProxyGuide.js";
 
 function setFormBusy(formId, busy) {
   const form = document.getElementById(formId);
@@ -65,7 +66,57 @@ export function openCreateProfileModal() {
   const authMethodEl = document.getElementById("new-profile-auth-method");
   if (authMethodEl) authMethodEl.value = "bearer";
   renderProfileAuthFields("bearer");
+  updateProfileRouteGuide();
   openModal("modal-create-profile", { focusSelector: "#modal-create-profile .form-input" });
+}
+
+function setProfileGuideText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value;
+}
+
+export function updateProfileRouteGuide() {
+  const target = document.getElementById("new-profile-target")?.value || "";
+  const service = document.getElementById("new-profile-service")?.value || "";
+  const preview = buildProfileRoutePreview(target, service, getCurrentVaultOrigin());
+  const status = document.getElementById("profile-route-guide-status");
+  const copyButton = document.getElementById("copy-profile-proxy-url");
+  const applyButton = document.getElementById("apply-profile-target-origin");
+
+  setProfileGuideText("profile-route-target", preview.targetOrigin);
+  setProfileGuideText("profile-route-client", preview.proxyUrl);
+  if (status) {
+    status.textContent = preview.message;
+    status.classList.toggle("is-ready", preview.valid);
+    status.classList.toggle("is-error", !preview.valid && Boolean(target.trim() || service.trim()));
+  }
+  if (copyButton) copyButton.disabled = !preview.valid;
+  if (applyButton) applyButton.disabled = !preview.valid;
+}
+
+export function applyProfileTargetOrigin() {
+  const input = document.getElementById("new-profile-target");
+  const target = input?.value || "";
+  const service = document.getElementById("new-profile-service")?.value || "";
+  const preview = buildProfileRoutePreview(target, service, getCurrentVaultOrigin());
+  if (!preview.valid) {
+    showToast(preview.message || "Enter a valid upstream URL first", true);
+    return;
+  }
+  input.value = preview.targetOrigin;
+  updateProfileRouteGuide();
+  showToast("Upstream origin applied to the Target URL.");
+}
+
+export function copyProfileProxyUrl() {
+  const target = document.getElementById("new-profile-target")?.value || "";
+  const service = document.getElementById("new-profile-service")?.value || "";
+  const preview = buildProfileRoutePreview(target, service, getCurrentVaultOrigin());
+  if (!preview.valid) {
+    showToast(preview.message || "Enter a valid upstream URL first", true);
+    return;
+  }
+  copySnippetText(preview.proxyUrl, "Proxy URL copied!");
 }
 
 export function toggleInlineUserSecret(val) {
@@ -153,7 +204,12 @@ export async function submitCreateProfile() {
   await withMutationGuard("create-profile", async () => {
     setFormBusy("form-create-profile", true);
     const name = document.getElementById("new-profile-service").value.trim();
-    const target_url = document.getElementById("new-profile-target").value.trim();
+    const enteredTargetUrl = document.getElementById("new-profile-target").value.trim();
+    const routePreview = buildProfileRoutePreview(enteredTargetUrl, name, getCurrentVaultOrigin());
+    // Service Profiles proxy the request path against the configured origin.
+    // Normalize a pasted endpoint URL so the saved profile matches the route
+    // preview and clients do not accidentally have to repeat the path twice.
+    const target_url = routePreview.valid ? routePreview.targetOrigin : enteredTargetUrl;
     const auth_method = document.getElementById("new-profile-auth-method").value;
     const header_name = document.getElementById("new-profile-header-name")?.value.trim() || null;
     const cookie_name = document.getElementById("new-profile-cookie-name")?.value.trim() || null;

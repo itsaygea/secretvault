@@ -121,7 +121,7 @@ export async function handleSecretCli(): Promise<void> {
         process.exit(1);
       }
       const rawData = await res.json() as any;
-      const secrets: SecretItem[] = Array.isArray(rawData) ? rawData : (rawData?.secrets || []);
+      const secrets: SecretItem[] = Array.isArray(rawData) ? rawData : (rawData?.data || rawData?.secrets || []);
 
       if (secrets.length === 0) {
         console.log("No secrets found.");

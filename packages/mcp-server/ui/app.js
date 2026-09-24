@@ -2,7 +2,7 @@ import { showAuthCard, submitLogin, submitRegister, submitSetup, initDashboard, 
 import { updateDocsSnippets, openTotpSetupModal, cancelTotpSetup, verifyTotpSetup, copyBackupCodes, downloadBackupCodes, printBackupCodes, acknowledgeBackupCodes, regenerateBackupCodes, disableTotp, deletePasskey, submitChangePassword } from "./js/features/settings.js";
 import { openAddSecretModal, submitAddSecret, openRotateSecretModal, submitRotateSecret, deleteSecret, addTagPill, loadSecrets, handleSecretSearchInput } from "./js/features/secrets.js";
 import { openCreateClientModal, submitCreateClient, openEditClientModal, submitUpdateClient, viewClientLogs, renderClientLogs, revokeClient, loadClients, handleClientSearchInput } from "./js/features/clients.js";
-import { openCreateProfileModal, renderProfileAuthFields, toggleInlineUserSecret, toggleInlinePassSecret, submitCreateProfile, deleteProfile, loadProfiles } from "./js/features/profiles.js";
+import { openCreateProfileModal, renderProfileAuthFields, toggleInlineUserSecret, toggleInlinePassSecret, submitCreateProfile, deleteProfile, loadProfiles, updateProfileRouteGuide, copyProfileProxyUrl, applyProfileTargetOrigin } from "./js/features/profiles.js";
 import { loadActivity, renderActivity } from "./js/features/activity.js";
 import { loadUsers, loadAdminStats, openAddUserModal, submitAddUser, deleteUser, openAdminResetPassModal, submitAdminResetPassword, resetUser2FA } from "./js/features/users.js";
 import { switchSettingsTab, setupNavigation } from "./js/router.js";
@@ -132,6 +132,8 @@ document.addEventListener("click", (event) => {
     case "client-logs": viewClientLogs(target.dataset.clientId, target.dataset.appName); break;
     case "revoke-client": revokeClient(target.dataset.clientId); break;
     case "delete-profile": deleteProfile(target.dataset.profileId); break;
+    case "copy-profile-proxy-url": copyProfileProxyUrl(); break;
+    case "apply-profile-target-origin": applyProfileTargetOrigin(); break;
     case "delete-passkey": deletePasskey(target.dataset.passkeyId, target.dataset.deviceName); break;
     case "disable-totp": disableTotp(); break;
     case "add-tag-pill": addTagPill(target.dataset.tagVal); break;
@@ -190,6 +192,12 @@ document.addEventListener("change", (event) => {
 
 let totpAutoSubmitTimers = {};
 document.addEventListener("input", (event) => {
+  const profileRouteInput = event.target.closest?.('[data-input-action="profile-proxy-preview"]');
+  if (profileRouteInput) {
+    updateProfileRouteGuide();
+    return;
+  }
+
   const searchInput = event.target.closest?.('[data-input-action="search-secrets"]');
   if (searchInput) {
     handleSecretSearchInput(searchInput.value);

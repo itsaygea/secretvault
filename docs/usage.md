@@ -8,6 +8,7 @@ SecretVault is a Bounded Egress Gateway and Secret Proxy system designed to safe
 
 | Guide | Description | Key Topics |
 | :--- | :--- | :--- |
+| 🔗 **[Proxy Integration Quick Guide](proxy-quickstart.md)** | Copy/paste setup for provider APIs and coding tools | Service Profiles, proxy URL mapping, MCode, rotation-safe credentials |
 | 🖥️ **[CLI & Terminal Manager](cli.md)** | Terminal management & stdio execution | `secretvault`, `securevault`, `secretvault update`, `secretvault run`, `~/.secretvault/credential.json` |
 | 🌐 **[Web UI & Admin Portal](webui.md)** | Browser management interface (`/ui`) | Service Profiles, Secret management, Passkey & TOTP step-up authentication, Audit logs |
 | ⚡ **[MCP & AI Developer Tools](mcp.md)** | Model Context Protocol integrations | Antigravity IDE, Claude Code, Claude Desktop, OpenCode, Codex, Cursor, Streamable HTTP & SSE endpoints |
@@ -64,3 +65,10 @@ const response = await vault.proxy("qbittorrent", "/api/v2/torrents/info");
 ```
 
 For full details, see the **[SDKs & Client Libraries Guide](sdk.md)**.
+
+### 4. Provider API Proxy Quickstart
+
+Paste a provider's full API URL into **Services → Create Profile**. SecretVault
+shows the upstream origin to store in the profile and the client-facing proxy
+URL to use. The [Proxy Integration Quick Guide](proxy-quickstart.md) includes
+the working MCode pattern and key-rotation workflow.
